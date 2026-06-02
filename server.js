@@ -11,10 +11,12 @@ const app = express();
 
 // Must be registered before express.static so index.html is never served raw
 app.get('/', (_req, res) => {
-  const key = process.env.GOOGLE_MAPS_API_KEY || '';
+  const rawKey = process.env.GOOGLE_MAPS_API_KEY || '';
+  const key = rawKey.trim().replace(/^['"]|['"]$/g, '');
   if (!key || key === 'your_key_here') {
+    console.error('Missing or placeholder GOOGLE_MAPS_API_KEY.');
     return res.status(500).send(
-      '<h2>Set GOOGLE_MAPS_API_KEY in your .env file (copied from .env.example) then restart.</h2>'
+      '<h2>GOOGLE_MAPS_API_KEY is missing or invalid. Set it in your host environment variables and redeploy.</h2>'
     );
   }
   const html = readFileSync(join(__dirname, 'public/index.html'), 'utf8')
