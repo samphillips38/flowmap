@@ -29,6 +29,8 @@ let suppressMapClickUntil = 0;
 let heatmapHistory = [];
 let latestHeatmapData = null;
 let selectedHeatmapLocationIdxs = [];
+let mobileInputsCollapsed = false;
+let mobileLegendOpen = false;
 
 function newLocation() {
   return {
@@ -72,6 +74,7 @@ window.initApp = function () {
   loadHeatmapHistory();
   renderHistoryList();
   updateSamplingPreview();
+  initializeMobileUi();
 };
 
 // ── UI event wiring ────────────────────────────────────────────────────────
@@ -170,6 +173,94 @@ function setupEventListeners() {
   });
 
   document.getElementById('search-btn').addEventListener('click', runSearch);
+  document.getElementById('toggle-inputs-btn')?.addEventListener('click', toggleMobileInputs);
+  document.getElementById('toggle-legend-btn')?.addEventListener('click', toggleMobileLegend);
+  window.addEventListener('resize', applyMobileUiState);
+}
+
+function isPhoneLayout() {
+  return window.matchMedia('(max-width: 760px)').matches;
+}
+
+function initializeMobileUi() {
+  mobileInputsCollapsed = isPhoneLayout();
+  mobileLegendOpen = false;
+  applyMobileUiState();
+}
+
+function toggleMobileInputs() {
+  if (!isPhoneLayout()) return;
+  mobileInputsCollapsed = !mobileInputsCollapsed;
+  applyMobileUiState();
+  setTimeout(() => google.maps.event.trigger(googleMap, 'resize'), 220);
+}
+
+function toggleMobileLegend() {
+  if (!isPhoneLayout()) return;
+  mobileLegendOpen = !mobileLegendOpen;
+  if (mobileLegendOpen) {
+    ensureLegendVisibleForMobile();
+  }
+  applyMobileUiState();
+}
+
+function ensureLegendVisibleForMobile() {
+  const legend = document.getElementById('legend');
+  if (!legend) return;
+  if (legend.classList.contains('hidden')) {
+    renderLegendCombineControls();
+    renderHeatmapViewControls();
+    showLegend({
+      selectedCount: selectedHeatmapLocationIdxs.length || locations.length,
+      totalCount: locations.length,
+    });
+  }
+}
+
+function ensureLegendVisibleForDesktop() {
+  const legend = document.getElementById('legend');
+  if (!legend) return;
+  if (legend.classList.contains('hidden')) {
+    renderLegendCombineControls();
+    renderHeatmapViewControls();
+    showLegend({
+      selectedCount: selectedHeatmapLocationIdxs.length || locations.length,
+      totalCount: locations.length,
+    });
+  }
+}
+
+function applyMobileUiState() {
+  const app = document.getElementById('app');
+  const mapContainer = document.getElementById('map-container');
+  const legend = document.getElementById('legend');
+  const inputsBtn = document.getElementById('toggle-inputs-btn');
+  const legendBtn = document.getElementById('toggle-legend-btn');
+  if (!app || !mapContainer || !legend || !inputsBtn || !legendBtn) return;
+
+  const phoneLayout = isPhoneLayout();
+  if (!phoneLayout) {
+    app.classList.remove('mobile-sidebar-collapsed');
+    mapContainer.classList.remove('mobile-legend-open');
+    ensureLegendVisibleForDesktop();
+    inputsBtn.setAttribute('aria-expanded', 'true');
+    inputsBtn.textContent = 'Hide inputs';
+    legendBtn.setAttribute('aria-expanded', 'false');
+    legendBtn.textContent = 'Show key';
+    return;
+  }
+
+  app.classList.toggle('mobile-sidebar-collapsed', mobileInputsCollapsed);
+  mapContainer.classList.toggle('mobile-legend-open', mobileLegendOpen);
+  if (mobileLegendOpen) {
+    ensureLegendVisibleForMobile();
+  } else if (!latestHeatmapData?.timesMatrix?.length) {
+    legend.classList.add('hidden');
+  }
+  inputsBtn.setAttribute('aria-expanded', String(!mobileInputsCollapsed));
+  inputsBtn.textContent = mobileInputsCollapsed ? 'Show inputs' : 'Hide inputs';
+  legendBtn.setAttribute('aria-expanded', String(mobileLegendOpen));
+  legendBtn.textContent = mobileLegendOpen ? 'Hide key' : 'Show key';
 }
 
 // ── Location management ────────────────────────────────────────────────────
@@ -1063,7 +1154,12 @@ function clearResults() {
   selectedHeatmapLocationIdxs = [];
   renderLegendCombineControls();
   renderHeatmapViewControls();
-  document.getElementById('legend').classList.add('hidden');
+  const legend = document.getElementById('legend');
+  if (isPhoneLayout()) {
+    legend.classList.add('hidden');
+  } else {
+    ensureLegendVisibleForDesktop();
+  }
   document.getElementById('status-msg').className = 'status-msg hidden';
   document.getElementById('status-msg').textContent = '';
 }
