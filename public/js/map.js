@@ -172,23 +172,136 @@ function drawContourLines(ctx, scalarField, width, height, levels, scale) {
 
 // ── Canvas overlay ─────────────────────────────────────────────────────────
 
+// Build a lat/lng scalar field once; pan/zoom only re-samples it (no per-frame IDW).
+function buildGeoScalarField(renderPoints) {
+  if (!renderPoints.length) return null;
+
+  let south = Number.POSITIVE_INFINITY;
+  let north = Number.NEGATIVE_INFINITY;
+  let west = Number.POSITIVE_INFINITY;
+  let east = Number.NEGATIVE_INFINITY;
+  for (const p of renderPoints) {
+    if (p.lat < south) south = p.lat;
+    if (p.lat > north) north = p.lat;
+    if (p.lng < west) west = p.lng;
+    if (p.lng > east) east = p.lng;
+  }
+
+  const latSpan = Math.max(0.0005, north - south);
+  const lngSpan = Math.max(0.0005, east - west);
+  const padLat = latSpan * 0.08;
+  const padLng = lngSpan * 0.08;
+  south -= padLat;
+  north += padLat;
+  west -= padLng;
+  east += padLng;
+
+  const aspect = lngSpan / latSpan;
+  const geoCols = Math.min(128, Math.max(36, Math.round(Math.sqrt(renderPoints.length) * 5)));
+  const geoRows = Math.min(128, Math.max(36, Math.round(geoCols / Math.max(0.35, aspect))));
+
+  const midLat = (south + north) / 2;
+  const latM = (north - south) * 111320;
+  const lngM = (east - west) * 111320 * Math.max(0.2, Math.abs(Math.cos(toRadians(midLat))));
+  const typicalSpacingM = Math.sqrt((latM * lngM) / Math.max(1, renderPoints.length));
+  const influenceM = typicalSpacingM * 2.5;
+
+  const values = new Float32Array(geoCols * geoRows);
+  values.fill(Number.NaN);
+
+  for (let gy = 0; gy < geoRows; gy++) {
+    for (let gx = 0; gx < geoCols; gx++) {
+      const lat = south + ((gy + 0.5) / geoRows) * (north - south);
+      const lng = west + ((gx + 0.5) / geoCols) * (east - west);
+      const sample = { lat, lng };
+
+      let wSum = 0;
+      let tSum = 0;
+      for (const p of renderPoints) {
+        const distM = distanceMeters(sample, p);
+        if (distM > influenceM) continue;
+        if (distM < 8) {
+          wSum = 1;
+          tSum = p.time;
+          break;
+        }
+        const w = 1 / (distM * distM);
+        wSum += w;
+        tSum += p.time * w;
+      }
+      if (wSum > 0) values[gy * geoCols + gx] = tSum / wSum;
+    }
+  }
+
+  return { south, north, west, east, geoCols, geoRows, values };
+}
+
+function sampleGeoField(geo, lat, lng) {
+  if (lat < geo.south || lat > geo.north || lng < geo.west || lng > geo.east) return null;
+
+  const { geoCols, geoRows, values } = geo;
+  const fx = ((lng - geo.west) / (geo.east - geo.west)) * geoCols - 0.5;
+  const fy = ((lat - geo.south) / (geo.north - geo.south)) * geoRows - 0.5;
+  if (fx < 0 || fy < 0 || fx > geoCols - 1 || fy > geoRows - 1) return null;
+
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const x1 = Math.min(x0 + 1, geoCols - 1);
+  const y1 = Math.min(y0 + 1, geoRows - 1);
+  const tx = fx - x0;
+  const ty = fy - y0;
+
+  const v00 = values[y0 * geoCols + x0];
+  const v10 = values[y0 * geoCols + x1];
+  const v01 = values[y1 * geoCols + x0];
+  const v11 = values[y1 * geoCols + x1];
+
+  let wSum = 0;
+  let tSum = 0;
+  const corners = [
+    [v00, (1 - tx) * (1 - ty)],
+    [v10, tx * (1 - ty)],
+    [v01, (1 - tx) * ty],
+    [v11, tx * ty],
+  ];
+  for (const [v, w] of corners) {
+    if (!Number.isFinite(v) || w <= 0) continue;
+    wSum += w;
+    tSum += v * w;
+  }
+  return wSum > 0 ? tSum / wSum : null;
+}
+
+function latLngAtCanvasPoint(cornerLatLng, cx, cy, W, H) {
+  const tx = cx / W;
+  const ty = cy / H;
+  const lat = (1 - tx) * (1 - ty) * cornerLatLng.tl.lat
+    + tx * (1 - ty) * cornerLatLng.tr.lat
+    + (1 - tx) * ty * cornerLatLng.bl.lat
+    + tx * ty * cornerLatLng.br.lat;
+  const lng = (1 - tx) * (1 - ty) * cornerLatLng.tl.lng
+    + tx * (1 - ty) * cornerLatLng.tr.lng
+    + (1 - tx) * ty * cornerLatLng.bl.lng
+    + tx * ty * cornerLatLng.br.lng;
+  return { lat, lng };
+}
+
 // Defined as a factory so the class is evaluated only after Google Maps loads.
 function createTransitHeatmap(googleMap) {
   const MIN_RENDER_SCALE = 2;
-  const IDLE_TARGET_PIXELS = 140000;
-  const INTERACT_TARGET_PIXELS = 70000;
+  const TARGET_PIXELS_IDLE = 140000;
+  const TARGET_PIXELS_INTERACT = 90000;
 
   class TransitHeatmap extends google.maps.OverlayView {
     constructor(map) {
       super();
-      this.points = []; // [{lat, lng, time}] — time in seconds, null = no data
       this.renderPoints = [];
+      this.geoCache = null;
       this.minTime = 0;
       this.maxTime = 1;
-      this.displayMode = 'both'; // 'both' | 'heatmap' | 'contours'
+      this.displayMode = 'both';
       this.isInteracting = false;
-      this._rafHandle = null;
-      this._pendingRender = false;
+      this._off = null;
       this.setMap(map);
     }
 
@@ -199,11 +312,11 @@ function createTransitHeatmap(googleMap) {
     }
 
     setData(points) {
-      this.points = points;
       this.renderPoints = points.filter(point => point.time !== null);
       if (!this.renderPoints.length) {
         this.minTime = 0;
         this.maxTime = 1;
+        this.geoCache = null;
       } else {
         let minTime = Number.POSITIVE_INFINITY;
         let maxTime = Number.NEGATIVE_INFINITY;
@@ -213,18 +326,14 @@ function createTransitHeatmap(googleMap) {
         }
         this.minTime = minTime;
         this.maxTime = maxTime;
+        this.geoCache = buildGeoScalarField(this.renderPoints);
       }
-      this.requestDraw();
+      this.requestPaint();
     }
 
     clear() {
-      this.points = [];
       this.renderPoints = [];
-      this._pendingRender = false;
-      if (this._rafHandle) {
-        cancelAnimationFrame(this._rafHandle);
-        this._rafHandle = null;
-      }
+      this.geoCache = null;
       if (this.canvas) {
         const ctx = this.canvas.getContext('2d');
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -234,104 +343,54 @@ function createTransitHeatmap(googleMap) {
     setDisplayMode(mode) {
       const valid = ['both', 'heatmap', 'contours'];
       this.displayMode = valid.includes(mode) ? mode : 'both';
-      this.requestDraw();
+      this.requestPaint();
     }
 
-    setInteractionMode(isInteracting) {
-      if (this.isInteracting === isInteracting) return;
-      this.isInteracting = isInteracting;
-      this.requestDraw();
+    beginInteraction() {
+      this.isInteracting = true;
     }
 
-    requestDraw() {
-      if (this._pendingRender) return;
-      this._pendingRender = true;
-      this._rafHandle = requestAnimationFrame(() => {
-        this._pendingRender = false;
-        this._rafHandle = null;
-        this.draw();
+    endInteraction() {
+      this.isInteracting = false;
+      if (!this.getProjection()) return;
+      this.paint();
+      requestAnimationFrame(() => {
+        if (!this.isInteracting) this.paint();
       });
+    }
+
+    requestPaint() {
+      if (this.getProjection()) this.paint();
     }
 
     draw() {
-      const projection = this.getProjection();
-      if (!projection || !this.renderPoints.length) return;
+      this.paint();
+    }
 
-      const bounds = this.getMap().getBounds();
-      if (!bounds) return;
-
-      const sw = projection.fromLatLngToDivPixel(bounds.getSouthWest());
-      const ne = projection.fromLatLngToDivPixel(bounds.getNorthEast());
-
-      const L = Math.round(sw.x);
-      const T = Math.round(ne.y);
-      const W = Math.round(ne.x - sw.x);
-      const H = Math.round(sw.y - ne.y);
-
-      this.canvas.style.left = L + 'px';
-      this.canvas.style.top  = T + 'px';
-      this.canvas.width  = W;
-      this.canvas.height = H;
-
-      const ctx = this.canvas.getContext('2d');
-      ctx.clearRect(0, 0, W, H);
-
-      // Project all data points into canvas pixel space
-      const pts = this.renderPoints.map(p => {
-        const pos = projection.fromLatLngToDivPixel(new google.maps.LatLng(p.lat, p.lng));
-        return { x: pos.x - L, y: pos.y - T, time: p.time };
-      });
-      if (!pts.length) return;
-
-      // Estimate spacing from density in viewport pixels.
-      const spacing = Math.max(10, Math.sqrt((W * H) / pts.length));
-      const maxDistSq = (spacing * 2.5) ** 2; // ignore points beyond 2.5 cell-widths
-
-      // Render low-res and upscale. During interaction we cap more aggressively.
-      const targetPixels = this.isInteracting ? INTERACT_TARGET_PIXELS : IDLE_TARGET_PIXELS;
-      const dynamicScale = Math.ceil(Math.sqrt((W * H) / targetPixels));
-      const SCALE = Math.max(MIN_RENDER_SCALE, dynamicScale);
-      const rW = Math.ceil(W / SCALE);
-      const rH = Math.ceil(H / SCALE);
-
+    buildScalarField(cornerLatLng, W, H, SCALE, rW, rH, fillHeatmap) {
+      const scalarField = new Array(rW * rH).fill(null);
       if (!this._off) this._off = document.createElement('canvas');
-      this._off.width  = rW;
+      this._off.width = rW;
       this._off.height = rH;
 
-      const showHeatmap = this.displayMode === 'both' || this.displayMode === 'heatmap';
-      const showContours = this.displayMode === 'both' || this.displayMode === 'contours';
-
       const oCtx = this._off.getContext('2d');
-      const scalarField = new Array(rW * rH).fill(null);
       let img = null;
       let d = null;
-      if (showHeatmap) {
+      if (fillHeatmap) {
         img = oCtx.createImageData(rW, rH);
         d = img.data;
       }
 
       for (let py = 0; py < rH; py++) {
         for (let px = 0; px < rW; px++) {
-          // Centre of this low-res pixel in full-res canvas coordinates
           const cx = (px + 0.5) * SCALE;
           const cy = (py + 0.5) * SCALE;
+          const { lat, lng } = latLngAtCanvasPoint(cornerLatLng, cx, cy, W, H);
+          const value = sampleGeoField(this.geoCache, lat, lng);
+          if (value === null) continue;
 
-          // Inverse-distance weighting: nearby points dominate
-          let wSum = 0, tSum = 0;
-          for (const p of pts) {
-            const dx = cx - p.x, dy = cy - p.y;
-            const dist2 = dx * dx + dy * dy;
-            if (dist2 > maxDistSq) continue;       // too far — skip
-            if (dist2 < 1) { wSum = 1; tSum = p.time; break; } // on top of point
-            const w = 1 / dist2;
-            wSum += w;
-            tSum += p.time * w;
-          }
-
-          if (wSum === 0) continue; // no nearby data — leave transparent
-          const value = tSum / wSum;
           scalarField[py * rW + px] = value;
-          if (!showHeatmap) continue;
+          if (!fillHeatmap) continue;
           const color = travelTimeToColor(value, this.minTime, this.maxTime);
           if (color.a === 0) continue;
           const idx = (py * rW + px) * 4;
@@ -342,12 +401,64 @@ function createTransitHeatmap(googleMap) {
         }
       }
 
-      if (showHeatmap) {
-        oCtx.putImageData(img, 0, 0);
+      return { scalarField, img };
+    }
 
-        // Upscale with bilinear smoothing — hides the low-res grid entirely
+    paint() {
+      const projection = this.getProjection();
+      if (!projection || !this.renderPoints.length || !this.geoCache) return;
+
+      const bounds = this.getMap().getBounds();
+      if (!bounds) return;
+
+      const sw = projection.fromLatLngToDivPixel(bounds.getSouthWest());
+      const ne = projection.fromLatLngToDivPixel(bounds.getNorthEast());
+
+      const L = Math.floor(sw.x);
+      const T = Math.floor(ne.y);
+      const W = Math.ceil(ne.x - sw.x);
+      const H = Math.ceil(sw.y - ne.y);
+      if (W <= 0 || H <= 0) return;
+
+      this.canvas.style.left = L + 'px';
+      this.canvas.style.top = T + 'px';
+      this.canvas.style.width = W + 'px';
+      this.canvas.style.height = H + 'px';
+      if (this.canvas.width !== W || this.canvas.height !== H) {
+        this.canvas.width = W;
+        this.canvas.height = H;
+      }
+
+      const boundsNe = bounds.getNorthEast();
+      const boundsSw = bounds.getSouthWest();
+      const cornerLatLng = {
+        tl: { lat: boundsNe.lat(), lng: boundsSw.lng() },
+        tr: { lat: boundsNe.lat(), lng: boundsNe.lng() },
+        bl: { lat: boundsSw.lat(), lng: boundsSw.lng() },
+        br: { lat: boundsSw.lat(), lng: boundsNe.lng() },
+      };
+
+      const targetPixels = this.isInteracting ? TARGET_PIXELS_INTERACT : TARGET_PIXELS_IDLE;
+      const dynamicScale = Math.ceil(Math.sqrt((W * H) / targetPixels));
+      const SCALE = Math.max(MIN_RENDER_SCALE, dynamicScale);
+      const rW = Math.ceil(W / SCALE);
+      const rH = Math.ceil(H / SCALE);
+
+      const showHeatmap = this.displayMode === 'both' || this.displayMode === 'heatmap';
+      const showContours = !this.isInteracting
+        && (this.displayMode === 'both' || this.displayMode === 'contours');
+
+      const { scalarField, img } = this.buildScalarField(
+        cornerLatLng, W, H, SCALE, rW, rH, showHeatmap
+      );
+
+      const ctx = this.canvas.getContext('2d', { alpha: true });
+      ctx.clearRect(0, 0, W, H);
+
+      if (showHeatmap && img) {
+        this._off.getContext('2d').putImageData(img, 0, 0);
         ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
+        ctx.imageSmoothingQuality = this.isInteracting ? 'medium' : 'high';
         ctx.drawImage(this._off, 0, 0, W, H);
       }
 
@@ -362,10 +473,7 @@ function createTransitHeatmap(googleMap) {
     }
 
     onRemove() {
-      if (this._rafHandle) {
-        cancelAnimationFrame(this._rafHandle);
-      }
-      this.canvas.parentNode?.removeChild(this.canvas);
+      this.canvas?.parentNode?.removeChild(this.canvas);
     }
   }
 

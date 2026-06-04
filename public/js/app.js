@@ -52,7 +52,9 @@ function newLocation() {
 
 // ── Entry point (Google Maps callback) ────────────────────────────────────
 
-window.initApp = function () {
+window.initApp = async function () {
+  await Auth.init();
+
   googleMap = new google.maps.Map(document.getElementById('map'), {
     center: { lat: 51.505, lng: -0.09 },
     zoom: 11,
@@ -69,27 +71,21 @@ window.initApp = function () {
   heatmapOverlay.setDisplayMode(heatmapDisplayMode);
   matrixService   = new google.maps.DistanceMatrixService();
 
-  googleMap.addListener('dragstart', () => {
-    heatmapOverlay.setInteractionMode(true);
-  });
-  googleMap.addListener('zoom_changed', () => {
-    heatmapOverlay.setInteractionMode(true);
-  });
-  googleMap.addListener('idle', () => {
-    heatmapOverlay.setInteractionMode(false);
-    heatmapOverlay.requestDraw();
-  });
+  googleMap.addListener('dragstart', () => heatmapOverlay.beginInteraction());
+  googleMap.addListener('zoom_changed', () => heatmapOverlay.beginInteraction());
+  googleMap.addListener('idle', () => heatmapOverlay.endInteraction());
 
   addLocation();
   initSamplingDefaults();
   setupEventListeners();
   renderLocationList();
   updateSearchBtn();
-  loadHeatmapHistory();
-  renderHistoryList();
+  await refreshHeatmapHistory();
   updateSamplingPreview();
   initializeMobileUi();
 };
+
+window.onAuthReady = refreshHeatmapHistory;
 
 // ── UI event wiring ────────────────────────────────────────────────────────
 
@@ -1264,8 +1260,8 @@ function buildDepartureTime(dayOfWeek, timeStr) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function saveHistoryEntry({ gridPoints, reachableCount, timesMatrix = [] }) {
-  const entry = {
+function buildHistoryEntry({ gridPoints, reachableCount, timesMatrix = [] }) {
+  return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date().toISOString(),
     combineMode,
@@ -1289,31 +1285,78 @@ function saveHistoryEntry({ gridPoints, reachableCount, timesMatrix = [] }) {
     gridPoints: gridPoints.map(p => ({ lat: p.lat, lng: p.lng, time: p.time })),
     timesMatrix: timesMatrix.map(row => row.map(value => (value === null ? null : Number(value)))),
   };
+}
+
+async function saveHistoryEntry({ gridPoints, reachableCount, timesMatrix = [] }) {
+  const entry = buildHistoryEntry({ gridPoints, reachableCount, timesMatrix });
 
   heatmapHistory.unshift(entry);
   if (heatmapHistory.length > MAX_HISTORY_ITEMS) {
     heatmapHistory = heatmapHistory.slice(0, MAX_HISTORY_ITEMS);
   }
-  persistHeatmapHistory();
+
+  if (Auth.isLoggedIn()) {
+    try {
+      await Auth.saveCloudRun(entry);
+    } catch (err) {
+      showError(`Saved locally only: ${err.message}`);
+      persistHeatmapHistory();
+    }
+  } else {
+    persistHeatmapHistory();
+  }
   renderHistoryList();
 }
 
-function loadHeatmapHistory() {
+function readLocalHeatmapHistory() {
   try {
     const raw = localStorage.getItem(HEATMAP_HISTORY_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    heatmapHistory = Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    heatmapHistory = [];
+    return [];
   }
 }
 
+function loadHeatmapHistory() {
+  heatmapHistory = readLocalHeatmapHistory();
+}
+
 function persistHeatmapHistory() {
+  if (Auth.isLoggedIn()) return;
   try {
     localStorage.setItem(HEATMAP_HISTORY_KEY, JSON.stringify(heatmapHistory));
   } catch {
     // Ignore storage quota/runtime issues.
   }
+}
+
+function clearLocalHeatmapHistory() {
+  try {
+    localStorage.removeItem(HEATMAP_HISTORY_KEY);
+  } catch {
+    // Ignore storage issues.
+  }
+}
+
+async function refreshHeatmapHistory() {
+  if (Auth.isLoggedIn()) {
+    try {
+      const local = readLocalHeatmapHistory();
+      if (local.length) {
+        heatmapHistory = await Auth.syncLocalRunsToCloud(local);
+        clearLocalHeatmapHistory();
+      } else {
+        heatmapHistory = await Auth.fetchCloudRuns();
+      }
+    } catch (err) {
+      showError(`Could not load cloud history: ${err.message}`);
+      loadHeatmapHistory();
+    }
+  } else {
+    loadHeatmapHistory();
+  }
+  renderHistoryList();
 }
 
 function renderHistoryList() {
@@ -1324,7 +1367,9 @@ function renderHistoryList() {
   if (!heatmapHistory.length) {
     const empty = document.createElement('div');
     empty.className = 'history-empty';
-    empty.textContent = 'No saved heatmaps yet.';
+    empty.textContent = Auth.isLoggedIn()
+      ? 'No saved heatmaps on your account yet.'
+      : 'No saved heatmaps yet. Sign in to sync across devices.';
     list.appendChild(empty);
     return;
   }
@@ -1378,9 +1423,19 @@ function loadHistoryEntry(id) {
   showSuccess('Loaded heatmap from history.');
 }
 
-function deleteHistoryEntry(id) {
+async function deleteHistoryEntry(id) {
   heatmapHistory = heatmapHistory.filter(entry => entry.id !== id);
-  persistHeatmapHistory();
+  if (Auth.isLoggedIn()) {
+    try {
+      await Auth.deleteCloudRun(id);
+    } catch (err) {
+      showError(`Could not delete from account: ${err.message}`);
+      await refreshHeatmapHistory();
+      return;
+    }
+  } else {
+    persistHeatmapHistory();
+  }
   renderHistoryList();
 }
 

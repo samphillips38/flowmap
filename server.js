@@ -1,13 +1,20 @@
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import { readFileSync } from 'fs';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import apiRouter from './routes/api.js';
 
 dotenv.config();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
+
+app.use(express.json({ limit: '2mb' }));
+app.use(cookieParser());
+
+app.use('/api', apiRouter);
 
 // Must be registered before express.static so index.html is never served raw
 app.get('/', (_req, res) => {
