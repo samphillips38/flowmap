@@ -60,7 +60,7 @@ window.initApp = async function () {
     zoom: 11,
     styles: DARK_MAP_STYLE,
     disableDefaultUI: false,
-    zoomControl: true,
+    zoomControl: !isMapFirstLayout(),
     zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_CENTER },
     mapTypeControl: false,
     streetViewControl: false,
@@ -193,7 +193,6 @@ function setupEventListeners() {
   document.getElementById('search-btn').addEventListener('click', runSearch);
   document.getElementById('toggle-inputs-btn')?.addEventListener('click', toggleMobileInputs);
   document.getElementById('toggle-legend-btn')?.addEventListener('click', toggleMobileLegend);
-  document.getElementById('legend-peek-tab')?.addEventListener('click', openMobileLegend);
   document.getElementById('mobile-sheet-backdrop')?.addEventListener('click', closeMobileOverlay);
   setupSheetTransitionListener();
   setupLegendTransitionListener();
@@ -314,6 +313,11 @@ function isMapFirstLayout() {
   return window.matchMedia('(max-width: 980px)').matches;
 }
 
+function applyMapControlOptions() {
+  if (!googleMap) return;
+  googleMap.setOptions({ zoomControl: !isMapFirstLayout() });
+}
+
 function initializeMobileUi() {
   mobileInputsCollapsed = isMapFirstLayout();
   mobileLegendOpen = false;
@@ -366,10 +370,10 @@ function updateMapPadding() {
 
   const toolbar = document.querySelector('.mobile-map-bar');
   const toolbarH = toolbar?.offsetHeight ?? 52;
-  const top = toolbarH + 14;
+  const top = 14;
   const right = 56;
 
-  let bottom = 36;
+  let bottom = toolbarH + 14;
   if (!mobileInputsCollapsed) {
     const sidebar = document.getElementById('sidebar');
     if (sidebar) {
@@ -380,11 +384,6 @@ function updateMapPadding() {
     const legend = document.getElementById('legend');
     if (legend && !legend.classList.contains('hidden')) {
       bottom = Math.max(bottom, legend.offsetHeight + 16);
-    }
-  } else if (latestHeatmapData?.timesMatrix?.length) {
-    const peek = document.getElementById('legend-peek-tab');
-    if (peek && !peek.classList.contains('hidden')) {
-      bottom = Math.max(bottom, peek.offsetHeight + 24);
     }
   }
 
@@ -411,14 +410,6 @@ function toggleMobileInputs() {
   if (!mobileInputsCollapsed) {
     mobileLegendOpen = false;
   }
-  applyMobileUiState();
-}
-
-function openMobileLegend() {
-  if (!isMapFirstLayout()) return;
-  mobileLegendOpen = true;
-  mobileInputsCollapsed = true;
-  ensureLegendVisibleForMobile();
   applyMobileUiState();
 }
 
@@ -483,6 +474,7 @@ function applyMobileUiState() {
   resetSheetDragStyles();
 
   const mapFirst = isMapFirstLayout();
+  applyMapControlOptions();
   if (!mapFirst) {
     app.classList.remove('mobile-sidebar-collapsed');
     mapContainer.classList.remove('mobile-legend-open');
@@ -510,13 +502,6 @@ function applyMobileUiState() {
   }
   inputsBtn.setAttribute('aria-expanded', String(!mobileInputsCollapsed));
   legendBtn.setAttribute('aria-expanded', String(mobileLegendOpen));
-
-  const peekTab = document.getElementById('legend-peek-tab');
-  if (peekTab) {
-    const showPeek = Boolean(latestHeatmapData?.timesMatrix?.length) && !mobileLegendOpen;
-    peekTab.classList.toggle('hidden', !showPeek);
-    peekTab.setAttribute('aria-expanded', String(mobileLegendOpen));
-  }
 
   requestAnimationFrame(() => {
     updateMapPadding();
