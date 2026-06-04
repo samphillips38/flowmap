@@ -628,6 +628,34 @@ input[type="number"]:focus { border-color: var(--accent); }
   pointer-events: auto;
 }
 
+.legend-display-group {
+  margin-bottom: 10px;
+}
+
+.legend-display-group label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+
+.legend-locations {
+  margin-top: 2px;
+}
+
+.legend-locations .section-label {
+  margin-bottom: 6px;
+}
+
+#legend-items {
+  margin-top: 10px;
+}
+
+#legend-items.hidden {
+  display: none;
+}
+
 .legend-heatmap-view.hidden {
   display: none;
 }

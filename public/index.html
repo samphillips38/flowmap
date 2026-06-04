@@ -60,14 +60,6 @@
           <label>Sampling radius: <span id="sampling-radius-display">8.0 km</span></label>
           <input id="sampling-radius-km" type="range" min="1" max="30" step="0.5" value="8">
         </div>
-
-        <div class="advanced-group">
-          <label>Contour lines</label>
-          <div id="contour-visibility-toggle" class="segmented-control" role="group" aria-label="Contour visibility">
-            <button type="button" class="segment-btn" data-value="hide">Hide</button>
-            <button type="button" class="segment-btn active" data-value="show">Show</button>
-          </div>
-        </div>
       </div>
 
       <button id="search-btn" class="search-btn" disabled>Show travel times</button>
@@ -91,7 +83,6 @@
         <button id="toggle-legend-btn" class="mobile-map-btn" type="button" aria-expanded="false">Show key</button>
       </div>
       <div id="legend" class="legend floating-legend hidden">
-        <div class="section-label" id="legend-title">Travel time from origin</div>
         <div id="legend-combine-mode" class="legend-combine-mode hidden">
           <div class="section-label">Combine mode</div>
           <div id="combine-mode" class="segmented-control combine-segmented" role="group" aria-label="Combine mode">
@@ -102,9 +93,20 @@
           </div>
         </div>
         <div id="legend-heatmap-view" class="legend-heatmap-view hidden">
-          <div id="heatmap-view-controls" class="segmented-control" role="group" aria-label="Heatmap view"></div>
+          <div class="legend-display-group">
+            <label>Display</label>
+            <div id="heatmap-display-mode" class="segmented-control" role="group" aria-label="Heatmap display mode">
+              <button type="button" class="segment-btn active" data-value="both">Both</button>
+              <button type="button" class="segment-btn" data-value="heatmap">Heatmap</button>
+              <button type="button" class="segment-btn" data-value="contours">Contour lines</button>
+            </div>
+          </div>
+          <div id="legend-locations" class="legend-locations hidden">
+            <div class="section-label">Locations</div>
+            <div id="heatmap-view-controls" class="segmented-control" role="group" aria-label="Heatmap view"></div>
+          </div>
         </div>
-        <div id="legend-items"></div>
+        <div id="legend-items" class="hidden"></div>
       </div>
       <div id="loading" class="loading hidden">
         <div class="spinner"></div>

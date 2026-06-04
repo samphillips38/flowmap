@@ -4,6 +4,7 @@ const LOCATION_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#a855f7', 
 const DEST_BATCH = 25; // Distance Matrix API max destinations per request
 const HEATMAP_HISTORY_KEY = 'transitHeatmapHistoryV1';
 const MAX_HISTORY_ITEMS = 20;
+const HEATMAP_DISPLAY_MODES = ['both', 'heatmap', 'contours'];
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ let latestHeatmapData = null;
 let selectedHeatmapLocationIdxs = [];
 let mobileInputsCollapsed = false;
 let mobileLegendOpen = false;
-let contourLinesVisible = true;
+let heatmapDisplayMode = 'both';
 
 function newLocation() {
   return {
@@ -61,7 +62,7 @@ window.initApp = function () {
   });
 
   heatmapOverlay = createTransitHeatmap(googleMap);
-  heatmapOverlay.setContoursEnabled(contourLinesVisible);
+  heatmapOverlay.setDisplayMode(heatmapDisplayMode);
   matrixService   = new google.maps.DistanceMatrixService();
 
   googleMap.addListener('dragstart', () => {
@@ -167,14 +168,12 @@ function setupEventListeners() {
     toggleSamplingModeUI();
   });
 
-  document.getElementById('contour-visibility-toggle').addEventListener('click', e => {
+  document.getElementById('heatmap-display-mode').addEventListener('click', e => {
     const btn = e.target.closest('.segment-btn');
     if (!btn) return;
-    const visibilityValue = btn.dataset.value;
-    if (!visibilityValue) return;
-    setSegmentedValue('contour-visibility-toggle', visibilityValue);
-    contourLinesVisible = visibilityValue === 'show';
-    heatmapOverlay?.setContoursEnabled(contourLinesVisible);
+    const mode = btn.dataset.value;
+    if (!mode || !HEATMAP_DISPLAY_MODES.includes(mode)) return;
+    applyHeatmapDisplayMode(mode);
   });
 
   document.getElementById('history-list').addEventListener('click', e => {
@@ -229,10 +228,7 @@ function ensureLegendVisibleForMobile() {
   if (legend.classList.contains('hidden')) {
     renderLegendCombineControls();
     renderHeatmapViewControls();
-    showLegend({
-      selectedCount: selectedHeatmapLocationIdxs.length || locations.length,
-      totalCount: locations.length,
-    });
+    showLegend();
   }
 }
 
@@ -242,10 +238,7 @@ function ensureLegendVisibleForDesktop() {
   if (legend.classList.contains('hidden')) {
     renderLegendCombineControls();
     renderHeatmapViewControls();
-    showLegend({
-      selectedCount: selectedHeatmapLocationIdxs.length || locations.length,
-      totalCount: locations.length,
-    });
+    showLegend();
   }
 }
 
@@ -317,7 +310,7 @@ function applyStateWithoutClearing(entry) {
   samplingCenter = entry.samplingCenter ? { ...entry.samplingCenter } : samplingCenter;
   samplingBounds = entry.samplingBounds ? { ...entry.samplingBounds } : samplingBounds;
   samplingAreaVisible = entry.samplingAreaVisible !== false;
-  contourLinesVisible = entry.contourLinesVisible !== false;
+  applyHeatmapDisplayMode(normalizeHeatmapDisplayMode(entry));
 
   document.getElementById('sampling-density').value = String(samplingTargetPoints);
   document.getElementById('sampling-density-display').textContent = `${samplingTargetPoints}`;
@@ -325,8 +318,6 @@ function applyStateWithoutClearing(entry) {
   document.getElementById('sampling-radius-display').textContent = `${samplingRadiusKm.toFixed(1)} km`;
   setSegmentedValue('sampling-space-mode', samplingMode);
   setSegmentedValue('sampling-visibility-toggle', samplingAreaVisible ? 'show' : 'hide');
-  setSegmentedValue('contour-visibility-toggle', contourLinesVisible ? 'show' : 'hide');
-  heatmapOverlay?.setContoursEnabled(contourLinesVisible);
   toggleSamplingModeUI();
 }
 
@@ -519,11 +510,24 @@ function renderHeatmapViewControls() {
   const controls = document.getElementById('heatmap-view-controls');
   if (!section || !controls) return;
 
-  if (!latestHeatmapData || !latestHeatmapData.timesMatrix?.length || locations.length <= 1) {
+  const hasLiveData = Boolean(latestHeatmapData?.timesMatrix?.length);
+  if (!hasLiveData) {
     section.classList.add('hidden');
+    document.getElementById('legend-locations')?.classList.add('hidden');
     controls.innerHTML = '';
     return;
   }
+
+  section.classList.remove('hidden');
+
+  const locationsSection = document.getElementById('legend-locations');
+  if (locations.length <= 1) {
+    locationsSection?.classList.add('hidden');
+    controls.innerHTML = '';
+    return;
+  }
+
+  locationsSection?.classList.remove('hidden');
 
   const validIdxs = locations.map((_, idx) => idx);
   selectedHeatmapLocationIdxs = selectedHeatmapLocationIdxs.filter(idx => validIdxs.includes(idx));
@@ -563,7 +567,6 @@ function renderHeatmapViewControls() {
     `;
   }).join('');
   bindLegendWeightInputs();
-  section.classList.remove('hidden');
 }
 
 function bindLegendWeightInputs() {
@@ -611,10 +614,7 @@ function applySelectedHeatmapLocations() {
   const selectedPoints = buildHeatmapForSelection();
   if (!selectedPoints?.length) return;
   heatmapOverlay.setData(selectedPoints);
-  showLegend({
-    selectedCount: selectedHeatmapLocationIdxs.length,
-    totalCount: locations.length,
-  });
+  showLegend();
 }
 
 // ── Search button state ────────────────────────────────────────────────────
@@ -635,13 +635,11 @@ function initSamplingDefaults() {
   samplingTargetPoints = parseInt(document.getElementById('sampling-density').value, 10);
   samplingRadiusKm = parseFloat(document.getElementById('sampling-radius-km').value);
   samplingAreaVisible = (getSegmentedValue('sampling-visibility-toggle') || 'show') === 'show';
-  contourLinesVisible = (getSegmentedValue('contour-visibility-toggle') || 'show') === 'show';
+  applyHeatmapDisplayMode(getSegmentedValue('heatmap-display-mode') || 'both');
   document.getElementById('sampling-density-display').textContent = `${samplingTargetPoints}`;
   document.getElementById('sampling-radius-display').textContent = `${samplingRadiusKm.toFixed(1)} km`;
   setSegmentedValue('sampling-space-mode', samplingMode);
   setSegmentedValue('sampling-visibility-toggle', samplingAreaVisible ? 'show' : 'hide');
-  setSegmentedValue('contour-visibility-toggle', contourLinesVisible ? 'show' : 'hide');
-  heatmapOverlay?.setContoursEnabled(contourLinesVisible);
   initSamplingVisuals();
   toggleSamplingModeUI();
 }
@@ -1026,7 +1024,7 @@ function saveHistoryEntry({ gridPoints, reachableCount, timesMatrix = [] }) {
     samplingCenter: samplingCenter ? { ...samplingCenter } : null,
     samplingBounds: { ...samplingBounds },
     samplingAreaVisible,
-    contourLinesVisible,
+    heatmapDisplayMode,
     reachableCount,
     gridPoints: gridPoints.map(p => ({ lat: p.lat, lng: p.lng, time: p.time })),
     timesMatrix: timesMatrix.map(row => row.map(value => (value === null ? null : Number(value)))),
@@ -1114,7 +1112,7 @@ function loadHistoryEntry(id) {
     applySelectedHeatmapLocations();
   } else {
     heatmapOverlay.setData(entry.gridPoints || []);
-    showLegend({ selectedCount: locations.length, totalCount: locations.length });
+    showLegend();
   }
   showSuccess('Loaded heatmap from history.');
 }
@@ -1123,6 +1121,25 @@ function deleteHistoryEntry(id) {
   heatmapHistory = heatmapHistory.filter(entry => entry.id !== id);
   persistHeatmapHistory();
   renderHistoryList();
+}
+
+function normalizeHeatmapDisplayMode(entry) {
+  if (entry?.heatmapDisplayMode && HEATMAP_DISPLAY_MODES.includes(entry.heatmapDisplayMode)) {
+    return entry.heatmapDisplayMode;
+  }
+  if (entry?.contourLinesVisible === false) return 'heatmap';
+  return 'both';
+}
+
+function applyHeatmapDisplayMode(mode) {
+  heatmapDisplayMode = HEATMAP_DISPLAY_MODES.includes(mode) ? mode : 'both';
+  setSegmentedValue('heatmap-display-mode', heatmapDisplayMode);
+  heatmapOverlay?.setDisplayMode(heatmapDisplayMode);
+  updateLegendColorKey();
+}
+
+function heatmapShowsColorKey() {
+  return heatmapDisplayMode === 'both' || heatmapDisplayMode === 'heatmap';
 }
 
 function getSegmentedValue(containerId) {
@@ -1147,20 +1164,18 @@ const LEGEND_BANDS = [
   { label: 'Very slow', color: 'rgb(239,68,68)' },
 ];
 
-function showLegend({ selectedCount = locations.length, totalCount = locations.length } = {}) {
-  const legend = document.getElementById('legend');
-  const title  = document.getElementById('legend-title');
-  const items  = document.getElementById('legend-items');
-  const combineModeLabels = {
-    min: 'Minimum',
-    max: 'Maximum',
-    sum: 'Sum',
-    'weighted-sum': 'Weighted sum',
-  };
-  const modeLabel = combineModeLabels[combineMode] || 'Maximum';
-  title.textContent = `Combined score (${modeLabel}) - ${selectedCount}/${totalCount} locations`;
-  items.innerHTML = '';
+function updateLegendColorKey() {
+  const items = document.getElementById('legend-items');
+  if (!items) return;
 
+  const hasLiveData = Boolean(latestHeatmapData?.timesMatrix?.length);
+  if (!hasLiveData || !heatmapShowsColorKey()) {
+    items.classList.add('hidden');
+    items.innerHTML = '';
+    return;
+  }
+
+  items.innerHTML = '';
   LEGEND_BANDS.forEach(({ label, color }) => {
     const item = document.createElement('div');
     item.className = 'legend-item';
@@ -1170,8 +1185,12 @@ function showLegend({ selectedCount = locations.length, totalCount = locations.l
     `;
     items.appendChild(item);
   });
+  items.classList.remove('hidden');
+}
 
-  legend.classList.remove('hidden');
+function showLegend() {
+  updateLegendColorKey();
+  document.getElementById('legend')?.classList.remove('hidden');
 }
 
 function clearResults() {

@@ -185,7 +185,7 @@ function createTransitHeatmap(googleMap) {
       this.renderPoints = [];
       this.minTime = 0;
       this.maxTime = 1;
-      this.contoursEnabled = true;
+      this.displayMode = 'both'; // 'both' | 'heatmap' | 'contours'
       this.isInteracting = false;
       this._rafHandle = null;
       this._pendingRender = false;
@@ -231,8 +231,9 @@ function createTransitHeatmap(googleMap) {
       }
     }
 
-    setContoursEnabled(enabled) {
-      this.contoursEnabled = Boolean(enabled);
+    setDisplayMode(mode) {
+      const valid = ['both', 'heatmap', 'contours'];
+      this.displayMode = valid.includes(mode) ? mode : 'both';
       this.requestDraw();
     }
 
@@ -297,10 +298,17 @@ function createTransitHeatmap(googleMap) {
       this._off.width  = rW;
       this._off.height = rH;
 
+      const showHeatmap = this.displayMode === 'both' || this.displayMode === 'heatmap';
+      const showContours = this.displayMode === 'both' || this.displayMode === 'contours';
+
       const oCtx = this._off.getContext('2d');
-      const img  = oCtx.createImageData(rW, rH);
-      const d    = img.data;
       const scalarField = new Array(rW * rH).fill(null);
+      let img = null;
+      let d = null;
+      if (showHeatmap) {
+        img = oCtx.createImageData(rW, rH);
+        d = img.data;
+      }
 
       for (let py = 0; py < rH; py++) {
         for (let px = 0; px < rW; px++) {
@@ -323,6 +331,7 @@ function createTransitHeatmap(googleMap) {
           if (wSum === 0) continue; // no nearby data — leave transparent
           const value = tSum / wSum;
           scalarField[py * rW + px] = value;
+          if (!showHeatmap) continue;
           const color = travelTimeToColor(value, this.minTime, this.maxTime);
           if (color.a === 0) continue;
           const idx = (py * rW + px) * 4;
@@ -333,14 +342,16 @@ function createTransitHeatmap(googleMap) {
         }
       }
 
-      oCtx.putImageData(img, 0, 0);
+      if (showHeatmap) {
+        oCtx.putImageData(img, 0, 0);
 
-      // Upscale with bilinear smoothing — hides the low-res grid entirely
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(this._off, 0, 0, W, H);
+        // Upscale with bilinear smoothing — hides the low-res grid entirely
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(this._off, 0, 0, W, H);
+      }
 
-      if (this.contoursEnabled && this.maxTime > this.minTime) {
+      if (showContours && this.maxTime > this.minTime) {
         const bandCount = 5;
         const levels = [];
         for (let i = 1; i < bandCount; i++) {
