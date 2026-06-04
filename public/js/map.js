@@ -450,8 +450,7 @@ function createTransitHeatmap(googleMap) {
       const rH = Math.ceil(H / SCALE);
 
       const showHeatmap = this.displayMode === 'both' || this.displayMode === 'heatmap';
-      const showContours = !this.isInteracting
-        && (this.displayMode === 'both' || this.displayMode === 'contours');
+      const showContours = this.displayMode === 'both' || this.displayMode === 'contours';
 
       const { scalarField, img } = this.buildScalarField(
         cornerLatLng, W, H, SCALE, rW, rH, showHeatmap
