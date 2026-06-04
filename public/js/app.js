@@ -5,6 +5,10 @@ const DEST_BATCH = 25; // Distance Matrix API max destinations per request
 const HEATMAP_HISTORY_KEY = 'transitHeatmapHistoryV1';
 const MAX_HISTORY_ITEMS = 20;
 const HEATMAP_DISPLAY_MODES = ['both', 'heatmap', 'contours'];
+// Horizontal double-arrow for the sampling-radius drag handle (SVG path, y-up).
+const SAMPLING_RADIUS_HANDLE_PATH =
+  'M -1 0 L -0.45 -0.38 L -0.45 -0.14 L 0.45 -0.14 L 0.45 -0.38 L 1 0 L 0.45 0.38 L 0.45 0.14 L -0.45 0.14 L -0.45 0.38 Z';
+const SAMPLING_RADIUS_HANDLE_SCALE = 10;
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -22,6 +26,8 @@ let samplingEditMode = true;
 let samplingCircle = null;
 let samplingRectangle = null;
 let samplingCenterMarker = null;
+let samplingRadiusMarker = null;
+let samplingRadiusDragging = false;
 let samplingPreviewDots = [];
 let samplingAreaVisible = true;
 let mapClickListener = null;
@@ -886,6 +892,44 @@ function initSamplingDefaults() {
   toggleSamplingModeUI();
 }
 
+function clampSamplingRadiusKm(km) {
+  return Math.min(30, Math.max(1, km));
+}
+
+function getSamplingRadiusMetersPerDegLng(lat) {
+  const lngRadians = (lat * Math.PI) / 180;
+  return 111320 * Math.max(0.2, Math.cos(lngRadians));
+}
+
+function getSamplingRadiusHandlePosition() {
+  const metersPerDegLng = getSamplingRadiusMetersPerDegLng(samplingCenter.lat);
+  const offsetLng = (samplingRadiusKm * 1000) / metersPerDegLng;
+  return { lat: samplingCenter.lat, lng: samplingCenter.lng + offsetLng };
+}
+
+function getRadialRadiusMetersFromLatLng(latLng) {
+  const metersPerDegLng = getSamplingRadiusMetersPerDegLng(samplingCenter.lat);
+  const deltaLng = latLng.lng() - samplingCenter.lng;
+  return deltaLng * metersPerDegLng;
+}
+
+function syncSamplingRadiusHandlePosition() {
+  if (!samplingRadiusMarker || samplingRadiusDragging || !samplingCenter) return;
+  samplingRadiusMarker.setPosition(getSamplingRadiusHandlePosition());
+}
+
+function setSamplingRadiusFromHandlePosition(latLng) {
+  const meters = getRadialRadiusMetersFromLatLng(latLng);
+  samplingRadiusKm = clampSamplingRadiusKm(meters / 1000);
+  document.getElementById('sampling-radius-km').value = samplingRadiusKm.toFixed(1);
+  document.getElementById('sampling-radius-display').textContent = `${samplingRadiusKm.toFixed(1)} km`;
+  updateSamplingPreview();
+  clearResults();
+  if (samplingRadiusMarker) {
+    samplingRadiusMarker.setPosition(getSamplingRadiusHandlePosition());
+  }
+}
+
 function toggleSamplingModeUI() {
   const radiusControls = document.getElementById('sampling-radius-controls');
   radiusControls.classList.toggle('hidden', samplingMode !== 'radius');
@@ -893,6 +937,10 @@ function toggleSamplingModeUI() {
 
   const areaVisible = samplingAreaVisible && samplingEditMode;
   samplingCenterMarker.setVisible(areaVisible && samplingMode === 'radius');
+  if (samplingRadiusMarker) {
+    samplingRadiusMarker.setVisible(areaVisible && samplingMode === 'radius');
+    samplingRadiusMarker.setDraggable(areaVisible && samplingMode === 'radius');
+  }
   samplingCircle.setVisible(areaVisible && samplingMode === 'radius');
   samplingRectangle.setVisible(areaVisible && samplingMode === 'bounds');
   samplingRectangle.setEditable(samplingEditMode && samplingMode === 'bounds');
@@ -953,9 +1001,10 @@ function initSamplingVisuals() {
   samplingCircle.addListener('radius_changed', () => {
     if (syncingSamplingVisuals) return;
     if (!samplingEditMode || samplingMode !== 'radius') return;
-    samplingRadiusKm = Math.max(1, samplingCircle.getRadius() / 1000);
+    samplingRadiusKm = clampSamplingRadiusKm(samplingCircle.getRadius() / 1000);
     document.getElementById('sampling-radius-km').value = samplingRadiusKm.toFixed(1);
     document.getElementById('sampling-radius-display').textContent = `${samplingRadiusKm.toFixed(1)} km`;
+    syncSamplingRadiusHandlePosition();
     updateSamplingPreview();
     clearResults();
   });
@@ -971,6 +1020,41 @@ function initSamplingVisuals() {
   });
 
   samplingCircle.addListener('mousedown', () => {
+    suppressMapClickUntil = Date.now() + 400;
+  });
+
+  samplingRadiusMarker = new google.maps.Marker({
+    map: googleMap,
+    position: getSamplingRadiusHandlePosition(),
+    visible: false,
+    draggable: true,
+    title: 'Drag to adjust sampling radius',
+    icon: {
+      path: SAMPLING_RADIUS_HANDLE_PATH,
+      scale: SAMPLING_RADIUS_HANDLE_SCALE,
+      fillColor: '#38bdf8',
+      fillOpacity: 0.95,
+      strokeColor: '#ffffff',
+      strokeWeight: 1.5,
+    },
+    zIndex: 165,
+  });
+
+  samplingRadiusMarker.addListener('dragstart', () => {
+    samplingRadiusDragging = true;
+    suppressMapClickUntil = Date.now() + 400;
+  });
+
+  samplingRadiusMarker.addListener('drag', () => {
+    setSamplingRadiusFromHandlePosition(samplingRadiusMarker.getPosition());
+  });
+
+  samplingRadiusMarker.addListener('dragend', () => {
+    setSamplingRadiusFromHandlePosition(samplingRadiusMarker.getPosition());
+    samplingRadiusDragging = false;
+  });
+
+  samplingRadiusMarker.addListener('mousedown', () => {
     suppressMapClickUntil = Date.now() + 400;
   });
 
@@ -1030,6 +1114,7 @@ function updateSamplingPreview() {
     samplingCircle.setCenter(samplingCenter);
     samplingCircle.setRadius(samplingRadiusKm * 1000);
     samplingCenterMarker.setPosition(samplingCenter);
+    syncSamplingRadiusHandlePosition();
     const latRadius = samplingRadiusKm / 111.32;
     const lngRadius = samplingRadiusKm / Math.max(8, Math.abs(Math.cos((samplingCenter.lat * Math.PI) / 180) * 111.32));
     samplingBounds = {
