@@ -313,6 +313,10 @@ function isMapFirstLayout() {
   return window.matchMedia('(max-width: 980px)').matches;
 }
 
+function hasMobileKeyContent() {
+  return Boolean(latestHeatmapData?.timesMatrix?.length);
+}
+
 function applyMapControlOptions() {
   if (!googleMap) return;
   googleMap.setOptions({ zoomControl: !isMapFirstLayout() });
@@ -414,7 +418,7 @@ function toggleMobileInputs() {
 }
 
 function toggleMobileLegend() {
-  if (!isMapFirstLayout()) return;
+  if (!isMapFirstLayout() || !hasMobileKeyContent()) return;
   mobileLegendOpen = !mobileLegendOpen;
   if (mobileLegendOpen) {
     mobileInputsCollapsed = true;
@@ -482,26 +486,31 @@ function applyMobileUiState() {
     ensureLegendVisibleForDesktop();
     inputsBtn.setAttribute('aria-expanded', 'false');
     legendBtn.setAttribute('aria-expanded', 'false');
+    legendBtn.classList.remove('hidden');
     updateMapPadding();
     triggerMapResize();
     return;
   }
 
+  const showKey = hasMobileKeyContent();
+  legendBtn.classList.toggle('hidden', !showKey);
+  if (!showKey) mobileLegendOpen = false;
+
   app.classList.toggle('mobile-sidebar-collapsed', mobileInputsCollapsed);
-  mapContainer.classList.toggle('mobile-legend-open', mobileLegendOpen);
+  mapContainer.classList.toggle('mobile-legend-open', mobileLegendOpen && showKey);
 
   const backdrop = document.getElementById('mobile-sheet-backdrop');
   if (backdrop) {
     backdrop.classList.toggle('hidden', mobileInputsCollapsed && !mobileLegendOpen);
   }
 
-  if (mobileLegendOpen) {
+  if (mobileLegendOpen && showKey) {
     ensureLegendVisibleForMobile();
-  } else if (!latestHeatmapData?.timesMatrix?.length) {
+  } else if (!showKey) {
     legend.classList.add('hidden');
   }
   inputsBtn.setAttribute('aria-expanded', String(!mobileInputsCollapsed));
-  legendBtn.setAttribute('aria-expanded', String(mobileLegendOpen));
+  legendBtn.setAttribute('aria-expanded', String(mobileLegendOpen && showKey));
 
   requestAnimationFrame(() => {
     updateMapPadding();

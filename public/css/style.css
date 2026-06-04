@@ -1106,7 +1106,7 @@ input[type="number"]:focus { border-color: var(--accent); }
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: calc(var(--mobile-bottom-bar-h) + env(safe-area-inset-bottom, 0px));
     width: 100%;
     min-width: 0;
     max-height: min(88dvh, 720px);
@@ -1171,10 +1171,6 @@ input[type="number"]:focus { border-color: var(--accent); }
     z-index: 460;
   }
 
-  #sidebar {
-    padding-bottom: calc(var(--mobile-bottom-bar-h) + env(safe-area-inset-bottom, 0px));
-  }
-
   .mobile-map-btn,
   .mobile-sheet-backdrop,
   .map-toast {
@@ -1188,13 +1184,13 @@ input[type="number"]:focus { border-color: var(--accent); }
   }
 
   #legend.floating-legend {
-    position: fixed;
+    position: absolute;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: calc(var(--mobile-bottom-bar-h) + env(safe-area-inset-bottom, 0px));
     top: auto;
     width: 100%;
-    max-height: min(72dvh, 620px);
+    max-height: calc(100dvh - var(--mobile-bottom-bar-h) - env(safe-area-inset-bottom, 0px) - 16px);
     background: var(--sidebar-bg);
     border: none;
     border-top: 1px solid var(--border);
@@ -1219,7 +1215,7 @@ input[type="number"]:focus { border-color: var(--accent); }
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
-    padding: 8px 16px calc(16px + var(--mobile-bottom-bar-h) + env(safe-area-inset-bottom, 0px));
+    padding: 8px 16px 16px;
   }
 
   .floating-legend .section-label {
@@ -1247,6 +1243,7 @@ input[type="number"]:focus { border-color: var(--accent); }
     transform: translateY(0);
     visibility: visible;
     pointer-events: auto;
+    max-height: calc(100dvh - var(--mobile-bottom-bar-h) - env(safe-area-inset-bottom, 0px) - 16px);
   }
 
   #map-container.mobile-legend-open .mobile-map-bar #toggle-legend-btn {
