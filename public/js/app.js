@@ -31,6 +31,7 @@ let latestHeatmapData = null;
 let selectedHeatmapLocationIdxs = [];
 let mobileInputsCollapsed = false;
 let mobileLegendOpen = false;
+let contourLinesVisible = true;
 
 function newLocation() {
   return {
@@ -60,10 +61,18 @@ window.initApp = function () {
   });
 
   heatmapOverlay = createTransitHeatmap(googleMap);
+  heatmapOverlay.setContoursEnabled(contourLinesVisible);
   matrixService   = new google.maps.DistanceMatrixService();
 
+  googleMap.addListener('dragstart', () => {
+    heatmapOverlay.setInteractionMode(true);
+  });
+  googleMap.addListener('zoom_changed', () => {
+    heatmapOverlay.setInteractionMode(true);
+  });
   googleMap.addListener('idle', () => {
-    heatmapOverlay.draw();
+    heatmapOverlay.setInteractionMode(false);
+    heatmapOverlay.requestDraw();
   });
 
   addLocation();
@@ -156,6 +165,16 @@ function setupEventListeners() {
     setSegmentedValue('sampling-visibility-toggle', visibilityValue);
     samplingAreaVisible = visibilityValue === 'show';
     toggleSamplingModeUI();
+  });
+
+  document.getElementById('contour-visibility-toggle').addEventListener('click', e => {
+    const btn = e.target.closest('.segment-btn');
+    if (!btn) return;
+    const visibilityValue = btn.dataset.value;
+    if (!visibilityValue) return;
+    setSegmentedValue('contour-visibility-toggle', visibilityValue);
+    contourLinesVisible = visibilityValue === 'show';
+    heatmapOverlay?.setContoursEnabled(contourLinesVisible);
   });
 
   document.getElementById('history-list').addEventListener('click', e => {
@@ -298,6 +317,7 @@ function applyStateWithoutClearing(entry) {
   samplingCenter = entry.samplingCenter ? { ...entry.samplingCenter } : samplingCenter;
   samplingBounds = entry.samplingBounds ? { ...entry.samplingBounds } : samplingBounds;
   samplingAreaVisible = entry.samplingAreaVisible !== false;
+  contourLinesVisible = entry.contourLinesVisible !== false;
 
   document.getElementById('sampling-density').value = String(samplingTargetPoints);
   document.getElementById('sampling-density-display').textContent = `${samplingTargetPoints}`;
@@ -305,6 +325,8 @@ function applyStateWithoutClearing(entry) {
   document.getElementById('sampling-radius-display').textContent = `${samplingRadiusKm.toFixed(1)} km`;
   setSegmentedValue('sampling-space-mode', samplingMode);
   setSegmentedValue('sampling-visibility-toggle', samplingAreaVisible ? 'show' : 'hide');
+  setSegmentedValue('contour-visibility-toggle', contourLinesVisible ? 'show' : 'hide');
+  heatmapOverlay?.setContoursEnabled(contourLinesVisible);
   toggleSamplingModeUI();
 }
 
@@ -613,10 +635,13 @@ function initSamplingDefaults() {
   samplingTargetPoints = parseInt(document.getElementById('sampling-density').value, 10);
   samplingRadiusKm = parseFloat(document.getElementById('sampling-radius-km').value);
   samplingAreaVisible = (getSegmentedValue('sampling-visibility-toggle') || 'show') === 'show';
+  contourLinesVisible = (getSegmentedValue('contour-visibility-toggle') || 'show') === 'show';
   document.getElementById('sampling-density-display').textContent = `${samplingTargetPoints}`;
   document.getElementById('sampling-radius-display').textContent = `${samplingRadiusKm.toFixed(1)} km`;
   setSegmentedValue('sampling-space-mode', samplingMode);
   setSegmentedValue('sampling-visibility-toggle', samplingAreaVisible ? 'show' : 'hide');
+  setSegmentedValue('contour-visibility-toggle', contourLinesVisible ? 'show' : 'hide');
+  heatmapOverlay?.setContoursEnabled(contourLinesVisible);
   initSamplingVisuals();
   toggleSamplingModeUI();
 }
@@ -1001,6 +1026,7 @@ function saveHistoryEntry({ gridPoints, reachableCount, timesMatrix = [] }) {
     samplingCenter: samplingCenter ? { ...samplingCenter } : null,
     samplingBounds: { ...samplingBounds },
     samplingAreaVisible,
+    contourLinesVisible,
     reachableCount,
     gridPoints: gridPoints.map(p => ({ lat: p.lat, lng: p.lng, time: p.time })),
     timesMatrix: timesMatrix.map(row => row.map(value => (value === null ? null : Number(value)))),

@@ -60,6 +60,14 @@
           <label>Sampling radius: <span id="sampling-radius-display">8.0 km</span></label>
           <input id="sampling-radius-km" type="range" min="1" max="30" step="0.5" value="8">
         </div>
+
+        <div class="advanced-group">
+          <label>Contour lines</label>
+          <div id="contour-visibility-toggle" class="segmented-control" role="group" aria-label="Contour visibility">
+            <button type="button" class="segment-btn" data-value="hide">Hide</button>
+            <button type="button" class="segment-btn active" data-value="show">Show</button>
+          </div>
+        </div>
       </div>
 
       <button id="search-btn" class="search-btn" disabled>Show travel times</button>
