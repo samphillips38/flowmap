@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>London Transit Times</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,6 +14,7 @@
 
     <aside id="sidebar">
       <div class="sidebar-header">
+        <div class="sheet-grab" aria-hidden="true"></div>
         <div class="logo">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
@@ -33,8 +34,8 @@
         </button>
       </div>
 
-      <div class="section">
-        <div class="section-label">Sampling</div>
+      <details class="section mobile-collapsible-section" id="sampling-section" open>
+        <summary class="section-label">Sampling</summary>
         <div class="advanced-group">
           <label>Sampling space</label>
           <div id="sampling-space-mode" class="segmented-control" role="group" aria-label="Sampling space">
@@ -60,16 +61,16 @@
           <label>Sampling radius: <span id="sampling-radius-display">8.0 km</span></label>
           <input id="sampling-radius-km" type="range" min="1" max="30" step="0.5" value="8">
         </div>
-      </div>
+      </details>
 
       <button id="search-btn" class="search-btn" disabled>Show travel times</button>
 
       <div id="status-msg" class="status-msg hidden"></div>
 
-      <div class="section">
-        <div class="section-label">History</div>
+      <details class="section mobile-collapsible-section" id="history-section">
+        <summary class="section-label">History</summary>
         <div id="history-list" class="history-list"></div>
-      </div>
+      </details>
 
       <div class="sidebar-footer">
         <span>Distance Matrix queries can incur Google API costs.</span>
@@ -78,11 +79,27 @@
 
     <main id="map-container">
       <div id="map"></div>
-      <div class="mobile-map-controls">
-        <button id="toggle-inputs-btn" class="mobile-map-btn" type="button" aria-expanded="true">Hide inputs</button>
-        <button id="toggle-legend-btn" class="mobile-map-btn" type="button" aria-expanded="false">Show key</button>
+      <button
+        id="mobile-sheet-backdrop"
+        class="mobile-sheet-backdrop hidden"
+        type="button"
+        aria-label="Close panel"
+        tabindex="-1"
+      ></button>
+      <div id="map-toast" class="map-toast hidden" role="status" aria-live="polite"></div>
+      <div class="mobile-map-bar" role="toolbar" aria-label="Map controls">
+        <button id="toggle-inputs-btn" class="mobile-map-btn" type="button" aria-expanded="false">Inputs</button>
+        <button id="toggle-legend-btn" class="mobile-map-btn" type="button" aria-expanded="false">Key</button>
       </div>
+      <button id="legend-peek-tab" class="legend-peek-tab hidden" type="button" aria-expanded="false">
+        Key
+      </button>
       <div id="legend" class="legend floating-legend hidden">
+        <div class="legend-sheet-header">
+          <div class="sheet-grab" aria-hidden="true"></div>
+          <h2 class="legend-sheet-title">Key</h2>
+        </div>
+        <div class="legend-sheet-body">
         <div id="legend-combine-mode" class="legend-combine-mode hidden">
           <div class="section-label">Combine mode</div>
           <div id="combine-mode" class="segmented-control combine-segmented" role="group" aria-label="Combine mode">

@@ -32,6 +32,7 @@ let latestHeatmapData = null;
 let selectedHeatmapLocationIdxs = [];
 let mobileInputsCollapsed = false;
 let mobileLegendOpen = false;
+let mapToastTimeout = null;
 let heatmapDisplayMode = 'both';
 
 function newLocation() {
@@ -56,6 +57,7 @@ window.initApp = function () {
     styles: DARK_MAP_STYLE,
     disableDefaultUI: false,
     zoomControl: true,
+    zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_CENTER },
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: false,
@@ -193,33 +195,153 @@ function setupEventListeners() {
   document.getElementById('search-btn').addEventListener('click', runSearch);
   document.getElementById('toggle-inputs-btn')?.addEventListener('click', toggleMobileInputs);
   document.getElementById('toggle-legend-btn')?.addEventListener('click', toggleMobileLegend);
+  document.getElementById('legend-peek-tab')?.addEventListener('click', openMobileLegend);
+  document.getElementById('mobile-sheet-backdrop')?.addEventListener('click', closeMobileOverlay);
+  setupSheetTransitionListener();
+  setupLegendTransitionListener();
   window.addEventListener('resize', applyMobileUiState);
 }
 
-function isPhoneLayout() {
-  return window.matchMedia('(max-width: 760px)').matches;
+function isMapFirstLayout() {
+  return window.matchMedia('(max-width: 980px)').matches;
 }
 
 function initializeMobileUi() {
-  mobileInputsCollapsed = isPhoneLayout();
+  mobileInputsCollapsed = isMapFirstLayout();
+  mobileLegendOpen = false;
+  applyMobileUiState();
+}
+
+function setupSheetTransitionListener() {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar || sidebar.dataset.sheetListener) return;
+  sidebar.dataset.sheetListener = '1';
+  sidebar.addEventListener('transitionend', e => {
+    if (e.propertyName !== 'transform' || !isMapFirstLayout()) return;
+    updateMapPadding();
+    triggerMapResize();
+  });
+}
+
+function setupLegendTransitionListener() {
+  const legend = document.getElementById('legend');
+  if (!legend || legend.dataset.sheetListener) return;
+  legend.dataset.sheetListener = '1';
+  legend.addEventListener('transitionend', e => {
+    if (e.propertyName !== 'transform' || !isMapFirstLayout()) return;
+    updateMapPadding();
+    triggerMapResize();
+  });
+}
+
+function closeMobileOverlay() {
+  if (!isMapFirstLayout()) return;
+  let changed = false;
+  if (!mobileInputsCollapsed) {
+    mobileInputsCollapsed = true;
+    changed = true;
+  }
+  if (mobileLegendOpen) {
+    mobileLegendOpen = false;
+    changed = true;
+  }
+  if (changed) applyMobileUiState();
+}
+
+function updateMapPadding() {
+  if (!googleMap) return;
+
+  if (!isMapFirstLayout()) {
+    googleMap.setOptions({ padding: { top: 0, right: 0, bottom: 0, left: 0 } });
+    return;
+  }
+
+  const toolbar = document.querySelector('.mobile-map-bar');
+  const toolbarH = toolbar?.offsetHeight ?? 52;
+  const top = toolbarH + 14;
+  const right = 56;
+
+  let bottom = 36;
+  if (!mobileInputsCollapsed) {
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+      bottom = Math.max(bottom, sidebar.offsetHeight + 16);
+    }
+  }
+  if (mobileLegendOpen) {
+    const legend = document.getElementById('legend');
+    if (legend && !legend.classList.contains('hidden')) {
+      bottom = Math.max(bottom, legend.offsetHeight + 16);
+    }
+  } else if (latestHeatmapData?.timesMatrix?.length) {
+    const peek = document.getElementById('legend-peek-tab');
+    if (peek && !peek.classList.contains('hidden')) {
+      bottom = Math.max(bottom, peek.offsetHeight + 24);
+    }
+  }
+
+  googleMap.setOptions({
+    padding: { top, right, bottom, left: 14 },
+  });
+}
+
+function triggerMapResize() {
+  if (!googleMap) return;
+  setTimeout(() => google.maps.event.trigger(googleMap, 'resize'), 230);
+}
+
+function enterMapViewMode() {
+  if (!isMapFirstLayout()) return;
+  mobileInputsCollapsed = true;
   mobileLegendOpen = false;
   applyMobileUiState();
 }
 
 function toggleMobileInputs() {
-  if (!isPhoneLayout()) return;
+  if (!isMapFirstLayout()) return;
   mobileInputsCollapsed = !mobileInputsCollapsed;
+  if (!mobileInputsCollapsed) {
+    mobileLegendOpen = false;
+  }
   applyMobileUiState();
-  setTimeout(() => google.maps.event.trigger(googleMap, 'resize'), 220);
+}
+
+function openMobileLegend() {
+  if (!isMapFirstLayout()) return;
+  mobileLegendOpen = true;
+  mobileInputsCollapsed = true;
+  ensureLegendVisibleForMobile();
+  applyMobileUiState();
 }
 
 function toggleMobileLegend() {
-  if (!isPhoneLayout()) return;
+  if (!isMapFirstLayout()) return;
   mobileLegendOpen = !mobileLegendOpen;
   if (mobileLegendOpen) {
+    mobileInputsCollapsed = true;
     ensureLegendVisibleForMobile();
   }
   applyMobileUiState();
+}
+
+function hideMapToast() {
+  const el = document.getElementById('map-toast');
+  if (!el) return;
+  el.classList.add('hidden');
+  clearTimeout(mapToastTimeout);
+}
+
+function showMapToast(message, type) {
+  const el = document.getElementById('map-toast');
+  if (!el) return;
+  el.textContent = message;
+  el.className = `map-toast ${type}`;
+  clearTimeout(mapToastTimeout);
+  mapToastTimeout = setTimeout(() => hideMapToast(), 4500);
+}
+
+function shouldUseMapToast() {
+  return isMapFirstLayout() && mobileInputsCollapsed;
 }
 
 function ensureLegendVisibleForMobile() {
@@ -250,29 +372,46 @@ function applyMobileUiState() {
   const legendBtn = document.getElementById('toggle-legend-btn');
   if (!app || !mapContainer || !legend || !inputsBtn || !legendBtn) return;
 
-  const phoneLayout = isPhoneLayout();
-  if (!phoneLayout) {
+  const mapFirst = isMapFirstLayout();
+  if (!mapFirst) {
     app.classList.remove('mobile-sidebar-collapsed');
     mapContainer.classList.remove('mobile-legend-open');
+    document.getElementById('mobile-sheet-backdrop')?.classList.add('hidden');
     ensureLegendVisibleForDesktop();
-    inputsBtn.setAttribute('aria-expanded', 'true');
-    inputsBtn.textContent = 'Hide inputs';
+    inputsBtn.setAttribute('aria-expanded', 'false');
     legendBtn.setAttribute('aria-expanded', 'false');
-    legendBtn.textContent = 'Show key';
+    updateMapPadding();
+    triggerMapResize();
     return;
   }
 
   app.classList.toggle('mobile-sidebar-collapsed', mobileInputsCollapsed);
   mapContainer.classList.toggle('mobile-legend-open', mobileLegendOpen);
+
+  const backdrop = document.getElementById('mobile-sheet-backdrop');
+  if (backdrop) {
+    backdrop.classList.toggle('hidden', mobileInputsCollapsed && !mobileLegendOpen);
+  }
+
   if (mobileLegendOpen) {
     ensureLegendVisibleForMobile();
   } else if (!latestHeatmapData?.timesMatrix?.length) {
     legend.classList.add('hidden');
   }
   inputsBtn.setAttribute('aria-expanded', String(!mobileInputsCollapsed));
-  inputsBtn.textContent = mobileInputsCollapsed ? 'Show inputs' : 'Hide inputs';
   legendBtn.setAttribute('aria-expanded', String(mobileLegendOpen));
-  legendBtn.textContent = mobileLegendOpen ? 'Hide key' : 'Show key';
+
+  const peekTab = document.getElementById('legend-peek-tab');
+  if (peekTab) {
+    const showPeek = Boolean(latestHeatmapData?.timesMatrix?.length) && !mobileLegendOpen;
+    peekTab.classList.toggle('hidden', !showPeek);
+    peekTab.setAttribute('aria-expanded', String(mobileLegendOpen));
+  }
+
+  requestAnimationFrame(() => {
+    updateMapPadding();
+    triggerMapResize();
+  });
 }
 
 // ── Location management ────────────────────────────────────────────────────
@@ -840,6 +979,7 @@ function updateSamplingPreview() {
 // ── Distance Matrix calls ──────────────────────────────────────────────────
 
 async function runSearch() {
+  hideMapToast();
   clearResults();
 
   const sampling = buildSamplingConfig();
@@ -875,12 +1015,19 @@ async function runSearch() {
     });
 
     const reachableCount = combinedPoints.filter(p => p.time !== null).length;
-    showSuccess(`Done. Computed combined scores for ${reachableCount} sampled areas.`);
+    enterMapViewMode();
+    collapseMobileSetupSections();
+    showSuccess(`Done. ${reachableCount} areas with travel times.`);
   } catch (err) {
     showError(err.message);
   } finally {
     setLoading(false);
   }
+}
+
+function collapseMobileSetupSections() {
+  if (!isMapFirstLayout()) return;
+  document.getElementById('sampling-section')?.removeAttribute('open');
 }
 
 async function fetchTimesMatrix(locationConfigs, gridPoints) {
@@ -1114,6 +1261,7 @@ function loadHistoryEntry(id) {
     heatmapOverlay.setData(entry.gridPoints || []);
     showLegend();
   }
+  enterMapViewMode();
   showSuccess('Loaded heatmap from history.');
 }
 
@@ -1194,19 +1342,24 @@ function showLegend() {
 }
 
 function clearResults() {
+  hideMapToast();
   heatmapOverlay?.clear();
   latestHeatmapData = null;
   selectedHeatmapLocationIdxs = [];
   renderLegendCombineControls();
   renderHeatmapViewControls();
   const legend = document.getElementById('legend');
-  if (isPhoneLayout()) {
+  if (isMapFirstLayout()) {
     legend.classList.add('hidden');
   } else {
     ensureLegendVisibleForDesktop();
   }
   document.getElementById('status-msg').className = 'status-msg hidden';
   document.getElementById('status-msg').textContent = '';
+  if (isMapFirstLayout()) {
+    mobileLegendOpen = false;
+    applyMobileUiState();
+  }
 }
 
 // ── UI state helpers ───────────────────────────────────────────────────────
@@ -1223,12 +1376,20 @@ function setLoadingText(text) {
 }
 
 function showError(msg) {
+  if (shouldUseMapToast()) {
+    showMapToast(msg, 'error');
+    return;
+  }
   const el = document.getElementById('status-msg');
   el.textContent = msg;
   el.className = 'status-msg error';
 }
 
 function showSuccess(msg) {
+  if (shouldUseMapToast()) {
+    showMapToast(msg, 'success');
+    return;
+  }
   const el = document.getElementById('status-msg');
   el.textContent = msg;
   el.className = 'status-msg success';
