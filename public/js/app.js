@@ -33,6 +33,8 @@ let selectedHeatmapLocationIdxs = [];
 let mobileInputsCollapsed = false;
 let mobileLegendOpen = false;
 let mapToastTimeout = null;
+let sheetDrag = { active: false, sheet: null, startY: 0, offsetY: 0, onClose: null, fromHandle: false };
+const SHEET_DISMISS_THRESHOLD_PX = 72;
 let heatmapDisplayMode = 'both';
 
 function newLocation() {
@@ -199,7 +201,117 @@ function setupEventListeners() {
   document.getElementById('mobile-sheet-backdrop')?.addEventListener('click', closeMobileOverlay);
   setupSheetTransitionListener();
   setupLegendTransitionListener();
+  setupMobileScrollLock();
+  setupMobileSheetSwipe();
   window.addEventListener('resize', applyMobileUiState);
+}
+
+function resetSheetDragStyles() {
+  ['sidebar', 'legend'].forEach(id => {
+    const sheet = document.getElementById(id);
+    if (!sheet) return;
+    sheet.classList.remove('sheet-dragging');
+    sheet.style.removeProperty('transform');
+  });
+  sheetDrag = { active: false, sheet: null, startY: 0, offsetY: 0, onClose: null, fromHandle: false };
+}
+
+function getSheetScrollEl(sheet) {
+  return sheet.querySelector('.legend-sheet-body') || sheet;
+}
+
+function canStartSheetDrag(sheet, target) {
+  if (target.closest('.sidebar-header, .legend-sheet-header, .sheet-grab')) return true;
+  return getSheetScrollEl(sheet).scrollTop <= 0;
+}
+
+function finishSheetDrag(sheet) {
+  if (!sheetDrag.active || sheetDrag.sheet !== sheet) return;
+  const shouldClose = sheetDrag.offsetY >= SHEET_DISMISS_THRESHOLD_PX;
+  sheet.classList.remove('sheet-dragging');
+  sheet.style.removeProperty('transform');
+  const onClose = sheetDrag.onClose;
+  sheetDrag = { active: false, sheet: null, startY: 0, offsetY: 0, onClose: null, fromHandle: false };
+  if (shouldClose && onClose) onClose();
+}
+
+function setupMobileSheetSwipe() {
+  const configs = [
+    {
+      id: 'sidebar',
+      isOpen: () => !mobileInputsCollapsed,
+      close: () => {
+        mobileInputsCollapsed = true;
+        applyMobileUiState();
+      },
+    },
+    {
+      id: 'legend',
+      isOpen: () => mobileLegendOpen,
+      close: () => {
+        mobileLegendOpen = false;
+        applyMobileUiState();
+      },
+    },
+  ];
+
+  configs.forEach(({ id, isOpen, close }) => {
+    const sheet = document.getElementById(id);
+    if (!sheet || sheet.dataset.swipeListener) return;
+    sheet.dataset.swipeListener = '1';
+
+    sheet.addEventListener('touchstart', e => {
+      if (!isMapFirstLayout() || !isOpen() || e.touches.length !== 1) return;
+      if (!canStartSheetDrag(sheet, e.target)) return;
+
+      sheetDrag = {
+        active: true,
+        sheet,
+        startY: e.touches[0].clientY,
+        offsetY: 0,
+        onClose: close,
+        fromHandle: Boolean(e.target.closest('.sidebar-header, .legend-sheet-header, .sheet-grab')),
+      };
+    }, { passive: true });
+
+    sheet.addEventListener('touchmove', e => {
+      if (!sheetDrag.active || sheetDrag.sheet !== sheet || e.touches.length !== 1) return;
+
+      const dy = e.touches[0].clientY - sheetDrag.startY;
+      if (dy <= 0) {
+        sheetDrag.offsetY = 0;
+        sheet.classList.remove('sheet-dragging');
+        sheet.style.removeProperty('transform');
+        return;
+      }
+
+      if (!sheetDrag.fromHandle && getSheetScrollEl(sheet).scrollTop > 0) {
+        sheetDrag.active = false;
+        sheet.classList.remove('sheet-dragging');
+        sheet.style.removeProperty('transform');
+        return;
+      }
+
+      sheetDrag.offsetY = dy;
+      sheet.classList.add('sheet-dragging');
+      sheet.style.transform = `translateY(${dy}px)`;
+      e.preventDefault();
+    }, { passive: false });
+
+    sheet.addEventListener('touchend', () => finishSheetDrag(sheet), { passive: true });
+    sheet.addEventListener('touchcancel', () => finishSheetDrag(sheet), { passive: true });
+  });
+}
+
+function setupMobileScrollLock() {
+  if (document.body.dataset.scrollLock) return;
+  document.body.dataset.scrollLock = '1';
+
+  document.addEventListener('touchmove', e => {
+    if (!isMapFirstLayout()) return;
+    if (e.target.closest('#map, #sidebar, #legend, .pac-container')) return;
+    e.preventDefault();
+  }, { passive: false });
 }
 
 function isMapFirstLayout() {
@@ -371,6 +483,8 @@ function applyMobileUiState() {
   const inputsBtn = document.getElementById('toggle-inputs-btn');
   const legendBtn = document.getElementById('toggle-legend-btn');
   if (!app || !mapContainer || !legend || !inputsBtn || !legendBtn) return;
+
+  resetSheetDragStyles();
 
   const mapFirst = isMapFirstLayout();
   if (!mapFirst) {
@@ -699,7 +813,6 @@ function renderHeatmapViewControls() {
         <div class="heatmap-location-header">
           <span class="heatmap-location-dot" style="background:${color};"></span>
           <span class="heatmap-location-label">${label}</span>
-          <span class="heatmap-location-state" aria-hidden="true">Selected</span>
         </div>
         ${weightEditor}
       </button>

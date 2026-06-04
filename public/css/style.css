@@ -447,24 +447,6 @@ input[type="number"]:focus { border-color: var(--accent); }
   flex: 1;
 }
 
-.heatmap-location-state {
-  display: none;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #bae6fd;
-  background: rgba(14, 116, 144, 0.35);
-  border: 1px solid rgba(56, 189, 248, 0.45);
-  border-radius: 999px;
-  padding: 2px 7px;
-  flex-shrink: 0;
-}
-
-.heatmap-location-cell.selected .heatmap-location-state {
-  display: inline-flex;
-}
-
 .heatmap-location-weight {
   display: flex;
   align-items: center;
@@ -936,17 +918,31 @@ input[type="number"]:focus { border-color: var(--accent); }
 .pac-icon { display: none !important; }
 
 @media (max-width: 980px) {
+  html, body {
+    overflow: hidden;
+    overscroll-behavior: none;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    position: fixed;
+    inset: 0;
+  }
+
   #app {
     display: block;
-    position: relative;
-    height: 100vh;
+    position: fixed;
+    inset: 0;
+    height: 100%;
     height: 100dvh;
     overflow: hidden;
+    overscroll-behavior: none;
   }
 
   #map-container {
     position: absolute;
     inset: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
   }
 
   #sidebar {
@@ -964,21 +960,48 @@ input[type="number"]:focus { border-color: var(--accent); }
     box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.45);
     transform: translateY(100%);
     visibility: hidden;
+    pointer-events: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), visibility 0.28s;
   }
 
   #app:not(.mobile-sidebar-collapsed) #sidebar {
     transform: translateY(0);
     visibility: visible;
+    pointer-events: auto;
   }
 
   .sheet-grab {
     display: block;
+    position: relative;
     width: 36px;
     height: 4px;
     border-radius: 999px;
     background: #4b5563;
     margin: 0 auto 12px;
+  }
+
+  .sheet-grab::after {
+    content: '';
+    position: absolute;
+    left: -40px;
+    right: -40px;
+    top: -20px;
+    bottom: -20px;
+  }
+
+  .sidebar-header,
+  .legend-sheet-header {
+    touch-action: none;
+    cursor: grab;
+  }
+
+  #sidebar.sheet-dragging,
+  #legend.sheet-dragging {
+    transition: none !important;
   }
 
   .sidebar-header {
@@ -987,6 +1010,14 @@ input[type="number"]:focus { border-color: var(--accent); }
 
   .mobile-map-bar {
     display: flex;
+    touch-action: manipulation;
+  }
+
+  .mobile-map-btn,
+  .legend-peek-tab,
+  .mobile-sheet-backdrop,
+  .map-toast {
+    touch-action: manipulation;
   }
 
   .map-toast {
@@ -1018,6 +1049,9 @@ input[type="number"]:focus { border-color: var(--accent); }
     flex-direction: column;
     transform: translateY(100%);
     visibility: hidden;
+    pointer-events: none;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), visibility 0.28s;
   }
 
@@ -1025,7 +1059,9 @@ input[type="number"]:focus { border-color: var(--accent); }
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -1053,6 +1089,7 @@ input[type="number"]:focus { border-color: var(--accent); }
   #map-container.mobile-legend-open #legend.floating-legend:not(.hidden) {
     transform: translateY(0);
     visibility: visible;
+    pointer-events: auto;
   }
 
   .legend-peek-tab:not(.hidden) {
