@@ -56,6 +56,11 @@ function travelTimeToColor(seconds, minSeconds, maxSeconds) {
   return { r, g, b, a };
 }
 
+function travelTimeToStrokeColor(seconds, minSeconds, maxSeconds) {
+  const { r, g, b } = travelTimeToColor(seconds, minSeconds, maxSeconds);
+  return `rgba(${r},${g},${b},0.95)`;
+}
+
 function lerp(a, b, t) {
   return a + ((b - a) * t);
 }
@@ -67,7 +72,7 @@ function edgePoint(edgeIdx, x, y, t) {
   return { x, y: y + 1 - t };
 }
 
-function drawContourLines(ctx, scalarField, width, height, levels, scale) {
+function drawContourLines(ctx, scalarField, width, height, levels, scale, minTime, maxTime) {
   if (!scalarField.length || !levels.length) return;
   const EPSILON = 1e-6;
   const edgeCorners = [
@@ -112,12 +117,12 @@ function drawContourLines(ctx, scalarField, width, height, levels, scale) {
   const smoothedField = fillSmallHoles(scalarField);
 
   ctx.save();
-  ctx.lineWidth = 1.2;
-  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-  ctx.shadowColor = 'rgba(0,0,0,0.5)';
-  ctx.shadowBlur = 1.5;
+  ctx.lineWidth = 1.4;
+  ctx.shadowColor = 'rgba(0,0,0,0.55)';
+  ctx.shadowBlur = 2;
 
   for (const level of levels) {
+    ctx.strokeStyle = travelTimeToStrokeColor(level, minTime, maxTime);
     ctx.beginPath();
     for (let y = 0; y < height - 1; y++) {
       for (let x = 0; x < width - 1; x++) {
@@ -468,7 +473,7 @@ function createTransitHeatmap(googleMap) {
         for (let i = 1; i < bandCount; i++) {
           levels.push(lerp(this.minTime, this.maxTime, i / bandCount));
         }
-        drawContourLines(ctx, scalarField, rW, rH, levels, SCALE);
+        drawContourLines(ctx, scalarField, rW, rH, levels, SCALE, this.minTime, this.maxTime);
       }
     }
 

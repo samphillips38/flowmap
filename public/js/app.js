@@ -1449,7 +1449,9 @@ function applyHeatmapDisplayMode(mode) {
 }
 
 function heatmapShowsColorKey() {
-  return heatmapDisplayMode === 'both' || heatmapDisplayMode === 'heatmap';
+  return heatmapDisplayMode === 'both'
+    || heatmapDisplayMode === 'heatmap'
+    || heatmapDisplayMode === 'contours';
 }
 
 function getSegmentedValue(containerId) {
