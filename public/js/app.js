@@ -333,7 +333,7 @@ function setupMobileScrollLock() {
 
   document.addEventListener('touchmove', e => {
     if (!isMapFirstLayout()) return;
-    if (e.target.closest('#map, #sidebar, #legend, .pac-container')) return;
+    if (e.target.closest('#map, #sidebar, #legend, #probe-times-panel, #history-modal, .pac-container')) return;
     e.preventDefault();
   }, { passive: false });
 }

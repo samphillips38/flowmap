@@ -153,12 +153,17 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   bottom: 12px;
   z-index: 355;
   width: min(320px, calc(100vw - 24px));
+  max-height: min(52vh, 520px);
+  display: flex;
+  flex-direction: column;
   background: rgba(17, 24, 39, 0.92);
   border: 1px solid #334155;
   border-radius: 10px;
   backdrop-filter: blur(4px);
   padding: 10px 12px;
   pointer-events: auto;
+  overflow: hidden;
+  touch-action: pan-y;
 }
 
 .probe-times-header {
@@ -167,6 +172,7 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
+  flex-shrink: 0;
 }
 
 .probe-times-title {
@@ -198,6 +204,7 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   color: var(--text-muted);
   line-height: 1.4;
   margin-bottom: 8px;
+  flex-shrink: 0;
 }
 
 .probe-times-hint.hidden {
@@ -208,13 +215,20 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding-right: 2px;
 }
 
 .probe-times-card {
   border: 1px solid #334155;
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.45);
-  overflow: hidden;
+  flex-shrink: 0;
 }
 
 .probe-times-card.expanded {
@@ -312,6 +326,11 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   border-top: 1px solid #334155;
   padding: 8px 10px 10px;
   background: rgba(2, 6, 23, 0.35);
+  max-height: min(36vh, 280px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .probe-route-distance {
@@ -1453,8 +1472,11 @@ input[type="number"]:focus { border-color: var(--accent); }
     right: 10px;
     width: auto;
     bottom: calc(var(--mobile-bottom-bar-h) + env(safe-area-inset-bottom, 0px) + 10px);
-    max-height: 42vh;
-    overflow-y: auto;
+    max-height: min(48vh, 420px);
+  }
+
+  .probe-route-details {
+    max-height: min(28vh, 220px);
   }
 
   html, body {
