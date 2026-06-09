@@ -42,6 +42,7 @@ let latestHeatmapData = null;
 let selectedHeatmapLocationIdxs = [];
 let mobileInputsCollapsed = false;
 let mobileLegendOpen = false;
+let historySheetOpen = false;
 let mapToastTimeout = null;
 let sheetDrag = { active: false, sheet: null, startY: 0, offsetY: 0, onClose: null, fromHandle: false };
 const SHEET_DISMISS_THRESHOLD_PX = 72;
@@ -194,7 +195,7 @@ function setupEventListeners() {
     if (!id) return;
     if (button.classList.contains('load')) {
       loadHistoryEntry(id);
-      closeHistoryModal();
+      closeHistorySheet();
       return;
     }
     if (button.classList.contains('delete')) {
@@ -202,10 +203,8 @@ function setupEventListeners() {
     }
   });
 
-  document.getElementById('history-open-btn')?.addEventListener('click', openHistoryModal);
-  document.getElementById('history-open-btn-mobile')?.addEventListener('click', openHistoryModal);
-  document.getElementById('history-modal-close')?.addEventListener('click', closeHistoryModal);
-  document.getElementById('history-modal-backdrop')?.addEventListener('click', closeHistoryModal);
+  document.getElementById('history-open-btn')?.addEventListener('click', toggleHistorySheet);
+  document.getElementById('history-open-btn-mobile')?.addEventListener('click', toggleHistorySheet);
   document.getElementById('probe-times-close')?.addEventListener('click', clearProbePin);
   document.getElementById('probe-times-list')?.addEventListener('click', e => {
     const toggle = e.target.closest('.probe-times-toggle');
@@ -225,13 +224,14 @@ function setupEventListeners() {
   document.getElementById('mobile-sheet-backdrop')?.addEventListener('click', closeMobileOverlay);
   setupSheetTransitionListener();
   setupLegendTransitionListener();
+  setupHistoryTransitionListener();
   setupMobileScrollLock();
   setupMobileSheetSwipe();
   window.addEventListener('resize', applyMobileUiState);
 }
 
 function resetSheetDragStyles() {
-  ['sidebar', 'legend'].forEach(id => {
+  ['sidebar', 'legend', 'history-sheet'].forEach(id => {
     const sheet = document.getElementById(id);
     if (!sheet) return;
     sheet.classList.remove('sheet-dragging');
@@ -241,11 +241,11 @@ function resetSheetDragStyles() {
 }
 
 function getSheetScrollEl(sheet) {
-  return sheet.querySelector('.legend-sheet-body') || sheet;
+  return sheet.querySelector('.legend-sheet-body, .history-sheet-body') || sheet;
 }
 
 function canStartSheetDrag(sheet, target) {
-  if (target.closest('.sidebar-header, .legend-sheet-header, .sheet-grab')) return true;
+  if (target.closest('.sidebar-header, .legend-sheet-header, .history-sheet-header, .sheet-grab')) return true;
   return getSheetScrollEl(sheet).scrollTop <= 0;
 }
 
@@ -277,6 +277,14 @@ function setupMobileSheetSwipe() {
         applyMobileUiState();
       },
     },
+    {
+      id: 'history-sheet',
+      isOpen: () => historySheetOpen,
+      close: () => {
+        historySheetOpen = false;
+        applyMobileUiState();
+      },
+    },
   ];
 
   configs.forEach(({ id, isOpen, close }) => {
@@ -294,7 +302,7 @@ function setupMobileSheetSwipe() {
         startY: e.touches[0].clientY,
         offsetY: 0,
         onClose: close,
-        fromHandle: Boolean(e.target.closest('.sidebar-header, .legend-sheet-header, .sheet-grab')),
+        fromHandle: Boolean(e.target.closest('.sidebar-header, .legend-sheet-header, .history-sheet-header, .sheet-grab')),
       };
     }, { passive: true });
 
@@ -333,7 +341,7 @@ function setupMobileScrollLock() {
 
   document.addEventListener('touchmove', e => {
     if (!isMapFirstLayout()) return;
-    if (e.target.closest('#map, #sidebar, #legend, #probe-times-panel, #history-modal, .pac-container')) return;
+    if (e.target.closest('#map, #sidebar, #legend, #history-sheet, #probe-times-panel, .pac-container')) return;
     e.preventDefault();
   }, { passive: false });
 }
@@ -354,6 +362,7 @@ function applyMapControlOptions() {
 function initializeMobileUi() {
   mobileInputsCollapsed = isMapFirstLayout();
   mobileLegendOpen = false;
+  historySheetOpen = false;
   applyMobileUiState();
 }
 
@@ -379,6 +388,19 @@ function setupLegendTransitionListener() {
   });
 }
 
+function setupHistoryTransitionListener() {
+  const sheet = document.getElementById('history-sheet');
+  if (!sheet || sheet.dataset.sheetListener) return;
+  sheet.dataset.sheetListener = '1';
+  sheet.addEventListener('transitionend', e => {
+    if (e.propertyName !== 'transform') return;
+    if (isMapFirstLayout()) {
+      updateMapPadding();
+      triggerMapResize();
+    }
+  });
+}
+
 function closeMobileOverlay() {
   if (!isMapFirstLayout()) return;
   let changed = false;
@@ -388,6 +410,10 @@ function closeMobileOverlay() {
   }
   if (mobileLegendOpen) {
     mobileLegendOpen = false;
+    changed = true;
+  }
+  if (historySheetOpen) {
+    historySheetOpen = false;
     changed = true;
   }
   if (changed) applyMobileUiState();
@@ -419,6 +445,12 @@ function updateMapPadding() {
       bottom = Math.max(bottom, legend.offsetHeight + 16);
     }
   }
+  if (historySheetOpen) {
+    const historySheet = document.getElementById('history-sheet');
+    if (historySheet) {
+      bottom = Math.max(bottom, historySheet.offsetHeight + 16);
+    }
+  }
 
   googleMap.setOptions({
     padding: { top, right, bottom, left: 14 },
@@ -434,6 +466,7 @@ function enterMapViewMode() {
   if (!isMapFirstLayout()) return;
   mobileInputsCollapsed = true;
   mobileLegendOpen = false;
+  historySheetOpen = false;
   applyMobileUiState();
 }
 
@@ -442,6 +475,7 @@ function toggleMobileInputs() {
   mobileInputsCollapsed = !mobileInputsCollapsed;
   if (!mobileInputsCollapsed) {
     mobileLegendOpen = false;
+    historySheetOpen = false;
   }
   applyMobileUiState();
 }
@@ -451,18 +485,33 @@ function toggleMobileLegend() {
   mobileLegendOpen = !mobileLegendOpen;
   if (mobileLegendOpen) {
     mobileInputsCollapsed = true;
+    historySheetOpen = false;
     ensureLegendVisibleForMobile();
   }
   applyMobileUiState();
 }
 
-function openHistoryModal() {
+function openHistorySheet() {
   renderHistoryList();
-  document.getElementById('history-modal')?.classList.remove('hidden');
+  historySheetOpen = true;
+  if (isMapFirstLayout()) {
+    mobileInputsCollapsed = true;
+    mobileLegendOpen = false;
+  }
+  applyMobileUiState();
 }
 
-function closeHistoryModal() {
-  document.getElementById('history-modal')?.classList.add('hidden');
+function closeHistorySheet() {
+  historySheetOpen = false;
+  applyMobileUiState();
+}
+
+function toggleHistorySheet() {
+  if (historySheetOpen) {
+    closeHistorySheet();
+    return;
+  }
+  openHistorySheet();
 }
 
 function hideMapToast() {
@@ -505,18 +554,31 @@ function ensureLegendVisibleForDesktop() {
   }
 }
 
+function applyHistorySheetUi(mapContainer, historyBtn) {
+  mapContainer.classList.toggle('history-sheet-open', historySheetOpen);
+  historyBtn?.setAttribute('aria-expanded', String(historySheetOpen));
+  if (historySheetOpen) {
+    document.getElementById('history-open-btn')?.classList.add('active');
+  } else {
+    document.getElementById('history-open-btn')?.classList.remove('active');
+  }
+}
+
 function applyMobileUiState() {
   const app = document.getElementById('app');
   const mapContainer = document.getElementById('map-container');
   const legend = document.getElementById('legend');
   const inputsBtn = document.getElementById('toggle-inputs-btn');
   const legendBtn = document.getElementById('toggle-legend-btn');
+  const historyBtn = document.getElementById('history-open-btn-mobile');
   if (!app || !mapContainer || !legend || !inputsBtn || !legendBtn) return;
 
   resetSheetDragStyles();
 
   const mapFirst = isMapFirstLayout();
   applyMapControlOptions();
+  applyHistorySheetUi(mapContainer, historyBtn);
+
   if (!mapFirst) {
     app.classList.remove('mobile-sidebar-collapsed');
     mapContainer.classList.remove('mobile-legend-open');
@@ -539,7 +601,7 @@ function applyMobileUiState() {
 
   const backdrop = document.getElementById('mobile-sheet-backdrop');
   if (backdrop) {
-    backdrop.classList.toggle('hidden', mobileInputsCollapsed && !mobileLegendOpen);
+    backdrop.classList.toggle('hidden', mobileInputsCollapsed && !mobileLegendOpen && !historySheetOpen);
   }
 
   if (mobileLegendOpen && showKey) {

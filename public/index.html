@@ -102,8 +102,18 @@
       </div>
       <div class="mobile-map-bar" role="toolbar" aria-label="Map controls">
         <button id="toggle-inputs-btn" class="mobile-map-btn" type="button" aria-expanded="false">Inputs</button>
-        <button id="history-open-btn-mobile" class="mobile-map-btn" type="button">History</button>
+        <button id="history-open-btn-mobile" class="mobile-map-btn" type="button" aria-expanded="false">History</button>
         <button id="toggle-legend-btn" class="mobile-map-btn" type="button" aria-expanded="false">Options</button>
+      </div>
+      <div id="history-sheet" class="history-sheet" role="dialog" aria-labelledby="history-sheet-title" aria-modal="true">
+        <div class="history-sheet-header">
+          <div class="sheet-grab" aria-hidden="true"></div>
+          <h2 id="history-sheet-title" class="history-sheet-title">Saved runs</h2>
+        </div>
+        <div class="history-sheet-body">
+          <p id="history-sync-hint" class="history-sync-hint">Sign in to save runs to your account and open them on any device.</p>
+          <div id="history-list" class="history-list"></div>
+        </div>
       </div>
       <div id="legend" class="legend floating-legend hidden">
         <div class="legend-sheet-header">
@@ -143,16 +153,6 @@
       </div>
     </main>
 
-  </div>
-
-  <div id="history-modal" class="auth-modal history-modal hidden" role="dialog" aria-labelledby="history-modal-title" aria-modal="true">
-    <button type="button" id="history-modal-backdrop" class="auth-modal-backdrop" aria-label="Close"></button>
-    <div class="auth-modal-card history-modal-card">
-      <button type="button" id="history-modal-close" class="auth-modal-close" aria-label="Close">×</button>
-      <h2 id="history-modal-title" class="auth-modal-title">Saved runs</h2>
-      <p id="history-sync-hint" class="history-sync-hint">Sign in to save runs to your account and open them on any device.</p>
-      <div id="history-list" class="history-list"></div>
-    </div>
   </div>
 
   <div id="auth-modal" class="auth-modal hidden" role="dialog" aria-labelledby="auth-modal-title" aria-modal="true">
