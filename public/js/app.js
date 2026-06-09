@@ -95,6 +95,7 @@ window.initApp = async function () {
   await refreshHeatmapHistory();
   updateSamplingPreview();
   initializeMobileUi();
+  Onboarding.init();
 };
 
 window.onAuthReady = refreshHeatmapHistory;

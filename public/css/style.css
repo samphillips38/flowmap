@@ -460,6 +460,181 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   font-style: italic;
 }
 
+/* ── Onboarding walkthrough ── */
+body.onboarding-open {
+  overflow: hidden;
+}
+
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.onboarding-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.onboarding-card {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 24px 22px;
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.5);
+}
+
+.onboarding-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.onboarding-close:hover {
+  color: var(--text);
+  background: rgba(75, 85, 99, 0.35);
+}
+
+.onboarding-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--accent);
+}
+
+.onboarding-step-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.onboarding-title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-bottom: 10px;
+}
+
+.onboarding-body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  min-height: 4.8em;
+}
+
+.onboarding-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin: 20px 0 18px;
+}
+
+.onboarding-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.2s, transform 0.2s;
+}
+
+.onboarding-dot.active {
+  background: var(--accent);
+  transform: scale(1.15);
+}
+
+.onboarding-dot.done {
+  background: rgba(56, 189, 248, 0.45);
+}
+
+.onboarding-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.onboarding-btn {
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.onboarding-btn:hover {
+  color: var(--text);
+  background: rgba(75, 85, 99, 0.35);
+}
+
+.onboarding-btn-muted {
+  background: transparent;
+}
+
+.onboarding-btn-primary {
+  margin-left: auto;
+  background: rgba(56, 189, 248, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.onboarding-btn-primary:hover {
+  background: rgba(56, 189, 248, 0.28);
+  color: var(--accent-hover);
+}
+
+@media (max-width: 480px) {
+  .onboarding-card {
+    padding: 24px 18px 18px;
+  }
+
+  .onboarding-body {
+    min-height: auto;
+  }
+
+  .onboarding-actions {
+    flex-wrap: wrap;
+  }
+
+  .onboarding-btn-primary {
+    flex: 1 1 100%;
+    margin-left: 0;
+    order: 3;
+  }
+
+  #onboarding-skip {
+    margin-left: auto;
+  }
+}
+
 .auth-modal {
   position: fixed;
   inset: 0;
