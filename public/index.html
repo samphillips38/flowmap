@@ -30,6 +30,7 @@
             <button type="button" id="auth-signout-btn" class="auth-btn auth-btn-muted">Sign out</button>
           </div>
         </div>
+        <button type="button" id="history-open-btn" class="history-open-btn sidebar-history-btn">Saved runs</button>
       </div>
 
       <div class="section">
@@ -76,12 +77,6 @@
 
       <div id="status-msg" class="status-msg hidden"></div>
 
-      <div class="section" id="history-section">
-        <div class="section-label">History</div>
-        <p id="history-sync-hint" class="history-sync-hint">Sign in to save runs to your account and open them on any device.</p>
-        <div id="history-list" class="history-list"></div>
-      </div>
-
       <div class="sidebar-footer">
         <span>Distance Matrix queries can incur Google API costs.</span>
       </div>
@@ -97,8 +92,17 @@
         tabindex="-1"
       ></button>
       <div id="map-toast" class="map-toast hidden" role="status" aria-live="polite"></div>
+      <div id="probe-times-panel" class="probe-times-panel hidden" role="region" aria-label="Travel times from pin">
+        <div class="probe-times-header">
+          <span class="probe-times-title">Travel times from pin</span>
+          <button type="button" id="probe-times-close" class="probe-times-close" aria-label="Close">×</button>
+        </div>
+        <p id="probe-times-hint" class="probe-times-hint">Tap the map to place a pin and see commute times.</p>
+        <div id="probe-times-list" class="probe-times-list"></div>
+      </div>
       <div class="mobile-map-bar" role="toolbar" aria-label="Map controls">
         <button id="toggle-inputs-btn" class="mobile-map-btn" type="button" aria-expanded="false">Inputs</button>
+        <button id="history-open-btn-mobile" class="mobile-map-btn" type="button">History</button>
         <button id="toggle-legend-btn" class="mobile-map-btn" type="button" aria-expanded="false">Options</button>
       </div>
       <div id="legend" class="legend floating-legend hidden">
@@ -141,6 +145,16 @@
 
   </div>
 
+  <div id="history-modal" class="auth-modal history-modal hidden" role="dialog" aria-labelledby="history-modal-title" aria-modal="true">
+    <button type="button" id="history-modal-backdrop" class="auth-modal-backdrop" aria-label="Close"></button>
+    <div class="auth-modal-card history-modal-card">
+      <button type="button" id="history-modal-close" class="auth-modal-close" aria-label="Close">×</button>
+      <h2 id="history-modal-title" class="auth-modal-title">Saved runs</h2>
+      <p id="history-sync-hint" class="history-sync-hint">Sign in to save runs to your account and open them on any device.</p>
+      <div id="history-list" class="history-list"></div>
+    </div>
+  </div>
+
   <div id="auth-modal" class="auth-modal hidden" role="dialog" aria-labelledby="auth-modal-title" aria-modal="true">
     <button type="button" id="auth-modal-backdrop" class="auth-modal-backdrop" aria-label="Close"></button>
     <div class="auth-modal-card">
@@ -170,7 +184,7 @@
   <script src="/js/app.js"></script>
   <!--
     Google Maps JS API — key injected by server.js.
-    Requires: Maps JavaScript API, Distance Matrix API, Places API
+    Requires: Maps JavaScript API, Distance Matrix API, Directions API, Places API
     all enabled in Google Cloud Console for this key.
   -->
   <script async

@@ -12,7 +12,7 @@ const SAMPLING_RADIUS_HANDLE_SCALE = 10;
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-let googleMap, heatmapOverlay, matrixService;
+let googleMap, heatmapOverlay, matrixService, directionsService;
 let combineMode = 'sum';
 let locations = [];
 let nextId = 1;
@@ -31,6 +31,10 @@ let samplingRadiusDragging = false;
 let samplingPreviewDots = [];
 let samplingAreaVisible = true;
 let mapClickListener = null;
+let probeMapClickListener = null;
+let probeMarker = null;
+let probeCoords = null;
+let probeFetchToken = 0;
 let syncingSamplingVisuals = false;
 let suppressMapClickUntil = 0;
 let heatmapHistory = [];
@@ -75,7 +79,8 @@ window.initApp = async function () {
 
   heatmapOverlay = createTransitHeatmap(googleMap);
   heatmapOverlay.setDisplayMode(heatmapDisplayMode);
-  matrixService   = new google.maps.DistanceMatrixService();
+  matrixService     = new google.maps.DistanceMatrixService();
+  directionsService = new google.maps.DirectionsService();
 
   googleMap.addListener('dragstart', () => heatmapOverlay.beginInteraction());
   googleMap.addListener('zoom_changed', () => heatmapOverlay.beginInteraction());
@@ -189,11 +194,29 @@ function setupEventListeners() {
     if (!id) return;
     if (button.classList.contains('load')) {
       loadHistoryEntry(id);
+      closeHistoryModal();
       return;
     }
     if (button.classList.contains('delete')) {
       deleteHistoryEntry(id);
     }
+  });
+
+  document.getElementById('history-open-btn')?.addEventListener('click', openHistoryModal);
+  document.getElementById('history-open-btn-mobile')?.addEventListener('click', openHistoryModal);
+  document.getElementById('history-modal-close')?.addEventListener('click', closeHistoryModal);
+  document.getElementById('history-modal-backdrop')?.addEventListener('click', closeHistoryModal);
+  document.getElementById('probe-times-close')?.addEventListener('click', clearProbePin);
+  document.getElementById('probe-times-list')?.addEventListener('click', e => {
+    const toggle = e.target.closest('.probe-times-toggle');
+    if (!toggle || toggle.disabled) return;
+    const card = toggle.closest('.probe-times-card');
+    const details = card?.querySelector('.probe-route-details');
+    if (!details) return;
+    const expanded = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', String(!expanded));
+    details.classList.toggle('hidden', expanded);
+    card.classList.toggle('expanded', !expanded);
   });
 
   document.getElementById('search-btn').addEventListener('click', runSearch);
@@ -431,6 +454,15 @@ function toggleMobileLegend() {
     ensureLegendVisibleForMobile();
   }
   applyMobileUiState();
+}
+
+function openHistoryModal() {
+  renderHistoryList();
+  document.getElementById('history-modal')?.classList.remove('hidden');
+}
+
+function closeHistoryModal() {
+  document.getElementById('history-modal')?.classList.add('hidden');
 }
 
 function hideMapToast() {
@@ -863,6 +895,383 @@ function applySelectedHeatmapLocations() {
   if (!selectedPoints?.length) return;
   heatmapOverlay.setData(selectedPoints);
   showLegend();
+  enableProbeMode();
+}
+
+function hasActiveHeatmap() {
+  return Boolean(latestHeatmapData?.timesMatrix?.length || latestHeatmapData?.grid?.length);
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds)) return '—';
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h} hr ${m} min` : `${h} hr`;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function stripHtml(html) {
+  const el = document.createElement('div');
+  el.innerHTML = html;
+  return el.textContent || '';
+}
+
+function describeTransitVehicle(type) {
+  const labels = {
+    BUS: 'Bus',
+    SUBWAY: 'Tube',
+    TRAIN: 'Train',
+    TRAM: 'Tram',
+    RAIL: 'Rail',
+    FERRY: 'Ferry',
+    CABLE_CAR: 'Cable car',
+    GONDOLA_LIFT: 'Gondola',
+    FUNICULAR: 'Funicular',
+  };
+  return labels[type] || 'Transit';
+}
+
+function parseRouteSteps(directionsResult) {
+  const leg = directionsResult?.routes?.[0]?.legs?.[0];
+  if (!leg) return null;
+
+  const steps = (leg.steps || []).map(step => {
+    if (step.travel_mode === 'TRANSIT' && step.transit) {
+      const line = step.transit.line || {};
+      const vehicle = describeTransitVehicle(line.vehicle?.type);
+      const lineName = line.short_name || line.name || vehicle;
+      return {
+        mode: 'transit',
+        label: lineName,
+        vehicle,
+        agency: line.agencies?.[0]?.name || '',
+        from: step.transit.departure_stop?.name || '',
+        to: step.transit.arrival_stop?.name || '',
+        stops: step.transit.num_stops,
+        duration: step.duration?.text || '',
+        headsign: step.transit.headsign || '',
+      };
+    }
+
+    const modeLabels = {
+      WALKING: 'Walk',
+      BICYCLING: 'Cycle',
+      DRIVING: 'Drive',
+    };
+    return {
+      mode: (step.travel_mode || 'unknown').toLowerCase(),
+      label: modeLabels[step.travel_mode] || step.travel_mode,
+      instructions: stripHtml(step.instructions || ''),
+      duration: step.duration?.text || '',
+    };
+  });
+
+  return {
+    seconds: leg.duration?.value ?? null,
+    distance: leg.distance?.text || '',
+    steps,
+    summary: buildRouteSummary(steps),
+  };
+}
+
+function buildRouteSummary(steps) {
+  const transitLabels = steps.filter(s => s.mode === 'transit').map(s => s.label);
+  if (transitLabels.length) return transitLabels.join(' → ');
+  const primary = steps.find(s => s.mode !== 'walking') || steps[0];
+  if (!primary) return '';
+  if (primary.instructions) {
+    return primary.instructions.length > 72
+      ? `${primary.instructions.slice(0, 69)}…`
+      : primary.instructions;
+  }
+  return primary.label;
+}
+
+function renderRouteStepHtml(step) {
+  if (step.mode === 'transit') {
+    const headsign = step.headsign ? ` towards ${escapeHtml(step.headsign)}` : '';
+    const stops = Number.isFinite(step.stops) ? `${step.stops} stop${step.stops === 1 ? '' : 's'}` : '';
+    const via = step.from && step.to
+      ? `<span class="probe-route-via">${escapeHtml(step.from)} → ${escapeHtml(step.to)}</span>`
+      : '';
+    return `
+      <li class="probe-route-step probe-route-step-transit">
+        <span class="probe-route-step-icon">${escapeHtml(step.vehicle)}</span>
+        <div class="probe-route-step-body">
+          <span class="probe-route-step-title">${escapeHtml(step.label)}${headsign}</span>
+          ${via}
+          <span class="probe-route-step-meta">${[stops, step.duration].filter(Boolean).join(' · ')}</span>
+        </div>
+      </li>
+    `;
+  }
+
+  const text = step.instructions || step.label;
+  return `
+    <li class="probe-route-step probe-route-step-${step.mode}">
+      <span class="probe-route-step-icon">${escapeHtml(step.label)}</span>
+      <div class="probe-route-step-body">
+        <span class="probe-route-step-title">${escapeHtml(text)}</span>
+        ${step.duration ? `<span class="probe-route-step-meta">${escapeHtml(step.duration)}</span>` : ''}
+      </div>
+    </li>
+  `;
+}
+
+function formatHistoryDate(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `Today · ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday · ${time}`;
+  return `${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${time}`;
+}
+
+function formatCombineModeLabel(mode) {
+  const labels = {
+    min: 'Min',
+    max: 'Max',
+    sum: 'Sum',
+    'weighted-sum': 'Weighted',
+  };
+  return labels[mode] || mode;
+}
+
+function ensureProbeMarker() {
+  if (probeMarker) return;
+  probeMarker = new google.maps.Marker({
+    map: null,
+    draggable: true,
+    title: 'Probe location',
+    icon: {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 9,
+      fillColor: '#f8fafc',
+      fillOpacity: 1,
+      strokeColor: '#6366f1',
+      strokeWeight: 3,
+    },
+    zIndex: 200,
+  });
+  probeMarker.addListener('dragend', () => {
+    const pos = probeMarker.getPosition();
+    if (!pos) return;
+    updateProbePin({ lat: pos.lat(), lng: pos.lng() });
+  });
+  probeMarker.addListener('mousedown', () => {
+    suppressMapClickUntil = Date.now() + 400;
+  });
+}
+
+function showProbePanel() {
+  const panel = document.getElementById('probe-times-panel');
+  if (!panel) return;
+  panel.classList.remove('hidden');
+  document.getElementById('probe-times-hint')?.classList.remove('hidden');
+}
+
+function hideProbePanel() {
+  document.getElementById('probe-times-panel')?.classList.add('hidden');
+}
+
+function renderProbeTimesList(rows, loading) {
+  const list = document.getElementById('probe-times-list');
+  const hint = document.getElementById('probe-times-hint');
+  if (!list) return;
+
+  if (loading) {
+    hint?.classList.add('hidden');
+    list.innerHTML = '<div class="probe-times-loading">Calculating routes…</div>';
+    return;
+  }
+
+  hint?.classList.add('hidden');
+  list.innerHTML = rows.map(row => {
+    const {
+      label,
+      color,
+      duration,
+      summary,
+      steps,
+      unavailable,
+      distance,
+    } = row;
+    const canExpand = !unavailable && steps?.length;
+    const detailsHtml = canExpand
+      ? `<ol class="probe-route-steps">${steps.map(renderRouteStepHtml).join('')}</ol>`
+      : `<p class="probe-route-empty">${unavailable ? 'No route found for this mode.' : 'No route details available.'}</p>`;
+
+    return `
+      <div class="probe-times-card">
+        <button
+          type="button"
+          class="probe-times-row probe-times-toggle"
+          aria-expanded="false"
+          ${canExpand ? '' : 'disabled'}
+        >
+          <span class="probe-times-dot" style="background:${color};"></span>
+          <span class="probe-times-main">
+            <span class="probe-times-label">${escapeHtml(label)}</span>
+            ${summary ? `<span class="probe-times-summary">${escapeHtml(summary)}</span>` : ''}
+          </span>
+          <span class="probe-times-value${unavailable ? ' muted' : ''}">${escapeHtml(duration)}</span>
+          ${canExpand ? '<span class="probe-times-chevron" aria-hidden="true"></span>' : ''}
+        </button>
+        <div class="probe-route-details hidden">
+          ${distance ? `<div class="probe-route-distance">${escapeHtml(distance)}</div>` : ''}
+          ${detailsHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function fetchProbeRoute(pinCoords, loc) {
+  if (!loc.coords) return null;
+
+  const travelMode = google.maps.TravelMode[loc.transport];
+  const departureTime = buildDepartureTime(loc.departDay, loc.departTime);
+  const request = {
+    origin: new google.maps.LatLng(pinCoords.lat, pinCoords.lng),
+    destination: new google.maps.LatLng(loc.coords.lat, loc.coords.lng),
+    travelMode,
+  };
+
+  if (travelMode === google.maps.TravelMode.TRANSIT) {
+    request.transitOptions = {
+      departureTime,
+      modes: [
+        google.maps.TransitMode.BUS,
+        google.maps.TransitMode.RAIL,
+        google.maps.TransitMode.SUBWAY,
+        google.maps.TransitMode.TRAIN,
+        google.maps.TransitMode.TRAM,
+      ],
+    };
+  } else if (travelMode === google.maps.TravelMode.DRIVING) {
+    request.drivingOptions = { departureTime };
+  }
+
+  return new Promise(resolve => {
+    directionsService.route(request, (result, status) => {
+      if (status !== 'OK') {
+        resolve(null);
+        return;
+      }
+      const parsed = parseRouteSteps(result);
+      if (!parsed) {
+        resolve(null);
+        return;
+      }
+      if (Number.isFinite(parsed.seconds) && Number.isFinite(loc.maxTravelMins) && loc.maxTravelMins > 0) {
+        parsed.seconds = Math.min(parsed.seconds, loc.maxTravelMins * 60);
+      }
+      resolve(parsed);
+    });
+  });
+}
+
+async function fetchProbeRoutes(pinCoords, locationConfigs) {
+  const results = locationConfigs.map(() => null);
+
+  for (let destIdx = 0; destIdx < locationConfigs.length; destIdx++) {
+    results[destIdx] = await fetchProbeRoute(pinCoords, locationConfigs[destIdx]);
+    if (destIdx < locationConfigs.length - 1) {
+      await sleep(150);
+    }
+  }
+
+  return results;
+}
+
+async function updateProbePin(coords) {
+  probeCoords = { ...coords };
+  ensureProbeMarker();
+  probeMarker.setPosition(coords);
+  probeMarker.setMap(googleMap);
+  showProbePanel();
+
+  const token = ++probeFetchToken;
+  renderProbeTimesList([], true);
+
+  try {
+    const routes = await fetchProbeRoutes(coords, locations);
+    if (token !== probeFetchToken) return;
+
+    const rows = locations.map((loc, idx) => {
+      const color = LOCATION_COLORS[idx % LOCATION_COLORS.length];
+      const label = loc.name?.trim() ? loc.name.trim() : `Location ${idx + 1}`;
+      const route = routes[idx];
+      const seconds = route?.seconds ?? null;
+      return {
+        label,
+        color,
+        duration: seconds === null ? 'No route' : formatDuration(seconds),
+        summary: route?.summary || '',
+        steps: route?.steps || [],
+        distance: route?.distance || '',
+        unavailable: seconds === null,
+      };
+    });
+    renderProbeTimesList(rows, false);
+  } catch (err) {
+    if (token !== probeFetchToken) return;
+    renderProbeTimesList([{
+      label: 'Error',
+      color: '#ef4444',
+      duration: err.message,
+      unavailable: true,
+    }], false);
+  }
+}
+
+function onProbeMapClick(e) {
+  if (!hasActiveHeatmap()) return;
+  if (Date.now() < suppressMapClickUntil) return;
+  if (!e?.latLng) return;
+  updateProbePin({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+}
+
+function enableProbeMode() {
+  if (!hasActiveHeatmap()) return;
+  showProbePanel();
+  ensureProbeMarker();
+  if (probeMapClickListener) return;
+  probeMapClickListener = googleMap.addListener('click', onProbeMapClick);
+}
+
+function disableProbeMode() {
+  probeFetchToken += 1;
+  if (probeMapClickListener) {
+    google.maps.event.removeListener(probeMapClickListener);
+    probeMapClickListener = null;
+  }
+  if (probeMarker) {
+    probeMarker.setMap(null);
+  }
+  probeCoords = null;
+  hideProbePanel();
+  document.getElementById('probe-times-list').innerHTML = '';
+  document.getElementById('probe-times-hint')?.classList.remove('hidden');
+}
+
+function clearProbePin() {
+  if (probeMarker) probeMarker.setMap(null);
+  probeCoords = null;
+  probeFetchToken += 1;
+  document.getElementById('probe-times-list').innerHTML = '';
+  document.getElementById('probe-times-hint')?.classList.remove('hidden');
 }
 
 // ── Search button state ────────────────────────────────────────────────────
@@ -1457,23 +1866,38 @@ function renderHistoryList() {
     const item = document.createElement('div');
     item.className = 'history-item';
 
-    const when = new Date(entry.createdAt).toLocaleString();
-    const locNames = (entry.locations || []).map(l => l.name).filter(Boolean).slice(0, 2);
-    const namesSuffix = (entry.locations || []).length > 2 ? ` +${entry.locations.length - 2} more` : '';
-    const locationLabel = locNames.length ? `${locNames.join(', ')}${namesSuffix}` : `${entry.locations?.length || 0} locations`;
+    const when = formatHistoryDate(entry.createdAt);
+    const locs = entry.locations || [];
+    const locationChips = locs.length
+      ? locs.map((loc, idx) => {
+        const color = LOCATION_COLORS[idx % LOCATION_COLORS.length];
+        const name = loc.name?.trim() ? loc.name.trim() : `Location ${idx + 1}`;
+        return `
+          <span class="history-location-chip">
+            <span class="history-location-dot" style="background:${color};"></span>
+            <span>${escapeHtml(name)}</span>
+          </span>
+        `;
+      }).join('')
+      : '<span class="history-location-chip muted">No locations</span>';
     const samplingLabel = entry.samplingMode === 'radius'
-      ? `Radius ${Number(entry.samplingRadiusKm || 0).toFixed(1)} km`
-      : 'Rectangle';
+      ? `${Number(entry.samplingRadiusKm || 0).toFixed(1)} km radius`
+      : 'Rectangle area';
 
     item.innerHTML = `
-      <div class="history-title">${when}</div>
-      <div class="history-meta">
-        ${locationLabel}<br>
-        Combine: ${entry.combineMode || 'sum'} | Sampling: ${samplingLabel} | Reachable: ${entry.reachableCount ?? 0}
+      <div class="history-item-header">
+        <time class="history-date">${escapeHtml(when)}</time>
+        <span class="history-count">${locs.length} location${locs.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="history-locations">${locationChips}</div>
+      <div class="history-tags">
+        <span class="history-tag">${escapeHtml(formatCombineModeLabel(entry.combineMode || 'sum'))}</span>
+        <span class="history-tag">${escapeHtml(samplingLabel)}</span>
+        <span class="history-tag">${entry.reachableCount ?? 0} reachable</span>
       </div>
       <div class="history-actions">
-        <button type="button" class="history-btn load" data-id="${entry.id}">Load</button>
-        <button type="button" class="history-btn delete" data-id="${entry.id}">Delete</button>
+        <button type="button" class="history-btn load" data-id="${entry.id}">Load heatmap</button>
+        <button type="button" class="history-btn delete" data-id="${entry.id}" aria-label="Delete run">Delete</button>
       </div>
     `;
 
@@ -1497,6 +1921,7 @@ function loadHistoryEntry(id) {
   } else {
     heatmapOverlay.setData(entry.gridPoints || []);
     showLegend();
+    enableProbeMode();
   }
   enterMapViewMode();
   showSuccess('Loaded heatmap from history.');
@@ -1592,6 +2017,7 @@ function showLegend() {
 
 function clearResults() {
   hideMapToast();
+  disableProbeMode();
   heatmapOverlay?.clear();
   latestHeatmapData = null;
   selectedHeatmapLocationIdxs = [];
