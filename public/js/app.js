@@ -4,21 +4,31 @@ const LOCATION_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#a855f7', 
 const DEST_BATCH = 25; // Distance Matrix API max destinations per request
 const PROBE_TUBE_RADIUS_M = 1500;
 const PROBE_TUBE_MAX = 5;
+const NEARBY_STATION_MODES = 'tube,dlr,overground,elizabeth-line';
+const NEARBY_STATION_STOP_TYPES = 'NaptanMetroStation,NaptanRailStation';
 const TUBE_LINE_COLORS = {
   bakerloo: '#B36305',
   central: '#E32017',
   circle: '#FFD300',
   district: '#00782A',
+  dlr: '#00A4A7',
+  elizabeth: '#6950A1',
   'hammersmith-city': '#F3A9BB',
   jubilee: '#A0A5A9',
+  liberty: '#5D6061',
+  lioness: '#FAA61A',
   metropolitan: '#9B0056',
+  mildmay: '#0077AD',
   northern: '#000000',
   piccadilly: '#003688',
+  suffragette: '#5BBD72',
   victoria: '#0098D4',
   'waterloo-city': '#95CDBA',
-  elizabeth: '#6950A1',
+  weaver: '#823A62',
+  windrush: '#ED1B00',
 };
-const TUBE_LINE_DARK_TEXT = new Set(['circle', 'hammersmith-city', 'waterloo-city']);
+const TUBE_LINE_DARK_TEXT = new Set(['circle', 'hammersmith-city', 'lioness', 'suffragette', 'waterloo-city']);
+const OVERGROUND_LINE_IDS = new Set(['liberty', 'lioness', 'mildmay', 'suffragette', 'weaver', 'windrush']);
 const HEATMAP_HISTORY_KEY = 'transitHeatmapHistoryV1';
 const MAX_HISTORY_ITEMS = 20;
 const HEATMAP_DISPLAY_MODES = ['both', 'heatmap', 'contours'];
@@ -1182,6 +1192,39 @@ function describeTransitVehicle(type) {
   return labels[type] || 'Transit';
 }
 
+function describeTransitLine(line) {
+  const shortName = line?.short_name || '';
+  const name = line?.name || '';
+  const combined = `${shortName} ${name}`.toLowerCase();
+  const id = (shortName || name).toLowerCase();
+
+  if (combined.includes('dlr')) return shortName || name || 'DLR';
+  if (combined.includes('elizabeth')) return name || shortName || 'Elizabeth line';
+  if (OVERGROUND_LINE_IDS.has(id) || combined.includes('overground')) {
+    return name || shortName || 'Overground';
+  }
+
+  return shortName || name || describeTransitVehicle(line?.vehicle?.type);
+}
+
+function getTransitRouteModes() {
+  // RAIL covers train, tram, light rail, and subway (Tube, DLR, Overground, Elizabeth line).
+  return [
+    google.maps.TransitMode.RAIL,
+    google.maps.TransitMode.SUBWAY,
+    google.maps.TransitMode.TRAIN,
+    google.maps.TransitMode.TRAM,
+    google.maps.TransitMode.BUS,
+  ];
+}
+
+function applyTransitRequestOptions(request, departureTime) {
+  request.transitOptions = {
+    departureTime,
+    modes: getTransitRouteModes(),
+  };
+}
+
 function parseRouteSteps(directionsResult) {
   const leg = directionsResult?.routes?.[0]?.legs?.[0];
   if (!leg) return null;
@@ -1189,12 +1232,12 @@ function parseRouteSteps(directionsResult) {
   const steps = (leg.steps || []).map(step => {
     if (step.travel_mode === 'TRANSIT' && step.transit) {
       const line = step.transit.line || {};
+      const lineName = describeTransitLine(line);
       const vehicle = describeTransitVehicle(line.vehicle?.type);
-      const lineName = line.short_name || line.name || vehicle;
       return {
         mode: 'transit',
         label: lineName,
-        vehicle,
+        vehicle: lineName !== vehicle ? lineName : vehicle,
         agency: line.agencies?.[0]?.name || '',
         from: step.transit.departure_stop?.name || '',
         to: step.transit.arrival_stop?.name || '',
@@ -1391,7 +1434,31 @@ function hideProbePanel() {
 function formatTubeStationName(name) {
   return String(name)
     .replace(/\s+Underground Station$/i, '')
-    .replace(/\s+Tube Station$/i, '');
+    .replace(/\s+Tube Station$/i, '')
+    .replace(/\s+DLR Station$/i, '')
+    .replace(/\s+Rail Station$/i, '');
+}
+
+function haversineMeters(a, b) {
+  const R = 6371000;
+  const toRad = deg => deg * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const x = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+function isBusLineId(lineId) {
+  return /^\d+$/.test(lineId) || /^n\d/i.test(lineId);
+}
+
+function filterTransitLines(lines) {
+  return (lines || [])
+    .filter(line => !isBusLineId(line.id))
+    .map(line => ({ id: line.id, name: line.name }));
 }
 
 function tubeLineBadgeStyle(lineId) {
@@ -1534,16 +1601,7 @@ async function fetchProbeRoute(pinCoords, loc) {
   };
 
   if (travelMode === google.maps.TravelMode.TRANSIT) {
-    request.transitOptions = {
-      departureTime,
-      modes: [
-        google.maps.TransitMode.BUS,
-        google.maps.TransitMode.RAIL,
-        google.maps.TransitMode.SUBWAY,
-        google.maps.TransitMode.TRAIN,
-        google.maps.TransitMode.TRAM,
-      ],
-    };
+    applyTransitRequestOptions(request, departureTime);
   } else if (travelMode === google.maps.TravelMode.DRIVING) {
     request.drivingOptions = { departureTime };
   }
@@ -1615,21 +1673,24 @@ async function fetchNearbyTubeStations(coords) {
   url.searchParams.set('lat', String(coords.lat));
   url.searchParams.set('lon', String(coords.lng));
   url.searchParams.set('radius', String(PROBE_TUBE_RADIUS_M));
-  url.searchParams.set('modes', 'tube');
-  url.searchParams.set('stopTypes', 'NaptanMetroStation');
+  url.searchParams.set('modes', NEARBY_STATION_MODES);
+  url.searchParams.set('stopTypes', NEARBY_STATION_STOP_TYPES);
 
   const res = await fetch(url);
-  if (!res.ok) throw new Error('Could not load tube stations');
+  if (!res.ok) throw new Error('Could not load nearby stations');
 
   const data = await res.json();
   return (data.stopPoints || [])
-    .slice(0, PROBE_TUBE_MAX)
     .map(station => ({
       name: formatTubeStationName(station.commonName || 'Station'),
       lat: station.lat,
       lng: station.lon,
-      lines: (station.lines || []).map(line => ({ id: line.id, name: line.name })),
-    }));
+      lines: filterTransitLines(station.lines),
+      distanceM: haversineMeters(coords, { lat: station.lat, lng: station.lon }),
+    }))
+    .sort((a, b) => a.distanceM - b.distanceM)
+    .slice(0, PROBE_TUBE_MAX)
+    .map(({ distanceM, ...station }) => station);
 }
 
 async function fetchNearbyTubeStationsWithWalk(coords) {
@@ -1648,7 +1709,12 @@ async function fetchNearbyTubeStationsWithWalk(coords) {
     }
   }
 
-  return enriched;
+  return enriched.sort((a, b) => {
+    if (a.walkSeconds === null && b.walkSeconds === null) return 0;
+    if (a.walkSeconds === null) return 1;
+    if (b.walkSeconds === null) return -1;
+    return a.walkSeconds - b.walkSeconds;
+  });
 }
 
 async function updateProbePin(coords, { name = null, fromSearch = false } = {}) {
@@ -2062,7 +2128,7 @@ async function runSearch() {
   setLoading(true, `Querying ${grid.length} locations (${Math.ceil(grid.length / DEST_BATCH)} batches)…`);
 
   try {
-    // timesMatrix[gridIdx] = [secondsFromOrigin0, secondsFromOrigin1, ...]
+    // timesMatrix[gridIdx][locationIdx] = seconds from grid point to that location
     const timesMatrix = await fetchTimesMatrix(locations, grid);
 
     latestHeatmapData = { grid, timesMatrix };
@@ -2111,22 +2177,13 @@ async function fetchTimesMatrix(locationConfigs, gridPoints) {
       setLoadingText(`Location ${originIdx + 1}/${locationConfigs.length} - Batch ${batchIdx}/${totalBatches}...`);
 
       const request = {
-        origins: [new google.maps.LatLng(loc.coords.lat, loc.coords.lng)],
-        destinations: batch.map(p => new google.maps.LatLng(p.lat, p.lng)),
+        origins: batch.map(p => new google.maps.LatLng(p.lat, p.lng)),
+        destinations: [new google.maps.LatLng(loc.coords.lat, loc.coords.lng)],
         travelMode,
       };
 
       if (travelMode === google.maps.TravelMode.TRANSIT) {
-        request.transitOptions = {
-          departureTime,
-          modes: [
-            google.maps.TransitMode.BUS,
-            google.maps.TransitMode.RAIL,
-            google.maps.TransitMode.SUBWAY,
-            google.maps.TransitMode.TRAIN,
-            google.maps.TransitMode.TRAM,
-          ],
-        };
+        applyTransitRequestOptions(request, departureTime);
       } else if (travelMode === google.maps.TravelMode.DRIVING) {
         request.drivingOptions = { departureTime };
       }
@@ -2138,14 +2195,14 @@ async function fetchTimesMatrix(locationConfigs, gridPoints) {
             return;
           }
 
-          batch.forEach((_, destIdx) => {
-            const el = response.rows[0].elements[destIdx];
+          batch.forEach((_, gridIdx) => {
+            const el = response.rows[gridIdx].elements[0];
             if (el.status !== 'OK') return;
             let seconds = el.duration.value;
             if (Number.isFinite(loc.maxTravelMins) && loc.maxTravelMins > 0) {
               seconds = Math.min(seconds, loc.maxTravelMins * 60);
             }
-            timesMatrix[start + destIdx][originIdx] = seconds;
+            timesMatrix[start + gridIdx][originIdx] = seconds;
           });
           resolve();
         });
