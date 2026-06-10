@@ -2,6 +2,23 @@
 
 const LOCATION_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4'];
 const DEST_BATCH = 25; // Distance Matrix API max destinations per request
+const PROBE_TUBE_RADIUS_M = 1500;
+const PROBE_TUBE_MAX = 5;
+const TUBE_LINE_COLORS = {
+  bakerloo: '#B36305',
+  central: '#E32017',
+  circle: '#FFD300',
+  district: '#00782A',
+  'hammersmith-city': '#F3A9BB',
+  jubilee: '#A0A5A9',
+  metropolitan: '#9B0056',
+  northern: '#000000',
+  piccadilly: '#003688',
+  victoria: '#0098D4',
+  'waterloo-city': '#95CDBA',
+  elizabeth: '#6950A1',
+};
+const TUBE_LINE_DARK_TEXT = new Set(['circle', 'hammersmith-city', 'waterloo-city']);
 const HEATMAP_HISTORY_KEY = 'transitHeatmapHistoryV1';
 const MAX_HISTORY_ITEMS = 20;
 const HEATMAP_DISPLAY_MODES = ['both', 'heatmap', 'contours'];
@@ -35,6 +52,7 @@ let probeMapClickListener = null;
 let probeMarker = null;
 let probeCoords = null;
 let probeFetchToken = 0;
+let probeAutocomplete = null;
 let syncingSamplingVisuals = false;
 let suppressMapClickUntil = 0;
 let heatmapHistory = [];
@@ -90,6 +108,7 @@ window.initApp = async function () {
   addLocation();
   initSamplingDefaults();
   setupEventListeners();
+  initProbeSearch();
   renderLocationList();
   updateSearchBtn();
   await refreshHeatmapHistory();
@@ -1111,6 +1130,46 @@ function formatCombineModeLabel(mode) {
   return labels[mode] || mode;
 }
 
+function setProbeSearchValue(name, confirmed) {
+  const input = document.getElementById('probe-search-input');
+  if (!input) return;
+  input.value = name || '';
+  input.classList.toggle('confirmed', Boolean(confirmed && name));
+}
+
+function initProbeSearch() {
+  const input = document.getElementById('probe-search-input');
+  if (!input || probeAutocomplete) return;
+
+  probeAutocomplete = new google.maps.places.Autocomplete(input, {
+    componentRestrictions: { country: 'gb' },
+    bounds: new google.maps.LatLngBounds(
+      new google.maps.LatLng(LONDON_BOUNDS.south, LONDON_BOUNDS.west),
+      new google.maps.LatLng(LONDON_BOUNDS.north, LONDON_BOUNDS.east)
+    ),
+    strictBounds: false,
+    fields: ['geometry', 'name', 'formatted_address'],
+  });
+
+  probeAutocomplete.addListener('place_changed', () => {
+    const place = probeAutocomplete.getPlace();
+    if (!place.geometry) return;
+    const name = place.name || place.formatted_address;
+    input.value = name;
+    input.classList.add('confirmed');
+    updateProbePin({
+      lat: place.geometry.location.lat(),
+      lng: place.geometry.location.lng(),
+    }, { name, fromSearch: true });
+  });
+
+  input.addEventListener('input', () => {
+    if (input.classList.contains('confirmed')) {
+      input.classList.remove('confirmed');
+    }
+  });
+}
+
 function ensureProbeMarker() {
   if (probeMarker) return;
   probeMarker = new google.maps.Marker({
@@ -1148,6 +1207,70 @@ function hideProbePanel() {
   document.getElementById('probe-times-panel')?.classList.add('hidden');
 }
 
+function formatTubeStationName(name) {
+  return String(name)
+    .replace(/\s+Underground Station$/i, '')
+    .replace(/\s+Tube Station$/i, '');
+}
+
+function tubeLineBadgeStyle(lineId) {
+  const bg = TUBE_LINE_COLORS[lineId] || '#475569';
+  const color = TUBE_LINE_DARK_TEXT.has(lineId) ? '#1e293b' : '#ffffff';
+  return `background:${bg};color:${color}`;
+}
+
+function renderProbeTubeStations(stations, loading) {
+  const section = document.getElementById('probe-tube-section');
+  const list = document.getElementById('probe-tube-list');
+  if (!section || !list) return;
+
+  if (loading) {
+    section.classList.remove('hidden');
+    list.innerHTML = '<div class="probe-times-loading">Finding nearby stations…</div>';
+    return;
+  }
+
+  if (!stations?.length) {
+    section.classList.add('hidden');
+    list.innerHTML = '';
+    return;
+  }
+
+  section.classList.remove('hidden');
+  list.innerHTML = stations.map(station => {
+    const walkLabel = station.walkSeconds === null
+      ? '—'
+      : formatDuration(station.walkSeconds);
+    const linesHtml = (station.lines || []).map(line => {
+      const badgeClass = [
+        'tube-line-badge',
+        line.id === 'northern' ? 'tube-line-badge-northern' : '',
+      ].filter(Boolean).join(' ');
+      return `
+        <span class="${badgeClass}" style="${tubeLineBadgeStyle(line.id)}" title="${escapeHtml(line.name)}">
+          ${escapeHtml(line.name)}
+        </span>
+      `;
+    }).join('');
+
+    return `
+      <div class="probe-tube-card">
+        <div class="probe-tube-row">
+          <span class="probe-tube-name">${escapeHtml(station.name)}</span>
+          <span class="probe-tube-walk${station.walkSeconds === null ? ' muted' : ''}">${escapeHtml(walkLabel)} walk</span>
+        </div>
+        ${linesHtml ? `<div class="probe-tube-lines">${linesHtml}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function clearProbeTubeStations() {
+  document.getElementById('probe-tube-section')?.classList.add('hidden');
+  const list = document.getElementById('probe-tube-list');
+  if (list) list.innerHTML = '';
+}
+
 function renderProbeTimesList(rows, loading) {
   const list = document.getElementById('probe-times-list');
   const hint = document.getElementById('probe-times-hint');
@@ -1156,6 +1279,7 @@ function renderProbeTimesList(rows, loading) {
   if (loading) {
     hint?.classList.add('hidden');
     list.innerHTML = '<div class="probe-times-loading">Calculating routes…</div>';
+    renderProbeTubeStations(null, true);
     return;
   }
 
@@ -1258,18 +1382,86 @@ async function fetchProbeRoutes(pinCoords, locationConfigs) {
   return results;
 }
 
-async function updateProbePin(coords) {
+function fetchWalkingRoute(origin, destination) {
+  return new Promise(resolve => {
+    directionsService.route({
+      origin: new google.maps.LatLng(origin.lat, origin.lng),
+      destination: new google.maps.LatLng(destination.lat, destination.lng),
+      travelMode: google.maps.TravelMode.WALKING,
+    }, (result, status) => {
+      if (status !== 'OK') {
+        resolve(null);
+        return;
+      }
+      const leg = result?.routes?.[0]?.legs?.[0];
+      resolve(leg ? { seconds: leg.duration?.value ?? null } : null);
+    });
+  });
+}
+
+async function fetchNearbyTubeStations(coords) {
+  const url = new URL('https://api.tfl.gov.uk/StopPoint');
+  url.searchParams.set('lat', String(coords.lat));
+  url.searchParams.set('lon', String(coords.lng));
+  url.searchParams.set('radius', String(PROBE_TUBE_RADIUS_M));
+  url.searchParams.set('modes', 'tube');
+  url.searchParams.set('stopTypes', 'NaptanMetroStation');
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Could not load tube stations');
+
+  const data = await res.json();
+  return (data.stopPoints || [])
+    .slice(0, PROBE_TUBE_MAX)
+    .map(station => ({
+      name: formatTubeStationName(station.commonName || 'Station'),
+      lat: station.lat,
+      lng: station.lon,
+      lines: (station.lines || []).map(line => ({ id: line.id, name: line.name })),
+    }));
+}
+
+async function fetchNearbyTubeStationsWithWalk(coords) {
+  const stations = await fetchNearbyTubeStations(coords);
+  const enriched = [];
+
+  for (let idx = 0; idx < stations.length; idx++) {
+    const station = stations[idx];
+    const walk = await fetchWalkingRoute(coords, { lat: station.lat, lng: station.lng });
+    enriched.push({
+      ...station,
+      walkSeconds: walk?.seconds ?? null,
+    });
+    if (idx < stations.length - 1) {
+      await sleep(150);
+    }
+  }
+
+  return enriched;
+}
+
+async function updateProbePin(coords, { name = null, fromSearch = false } = {}) {
   probeCoords = { ...coords };
   ensureProbeMarker();
   probeMarker.setPosition(coords);
   probeMarker.setMap(googleMap);
   showProbePanel();
 
+  if (fromSearch && name) {
+    setProbeSearchValue(name, true);
+    googleMap.panTo(coords);
+  } else if (!fromSearch) {
+    setProbeSearchValue('', false);
+  }
+
   const token = ++probeFetchToken;
   renderProbeTimesList([], true);
 
   try {
-    const routes = await fetchProbeRoutes(coords, locations);
+    const [routes, tubeStations] = await Promise.all([
+      fetchProbeRoutes(coords, locations),
+      fetchNearbyTubeStationsWithWalk(coords).catch(() => []),
+    ]);
     if (token !== probeFetchToken) return;
 
     const rows = locations.map((loc, idx) => {
@@ -1288,6 +1480,7 @@ async function updateProbePin(coords) {
       };
     });
     renderProbeTimesList(rows, false);
+    renderProbeTubeStations(tubeStations, false);
   } catch (err) {
     if (token !== probeFetchToken) return;
     renderProbeTimesList([{
@@ -1296,6 +1489,7 @@ async function updateProbePin(coords) {
       duration: err.message,
       unavailable: true,
     }], false);
+    clearProbeTubeStations();
   }
 }
 
@@ -1324,8 +1518,10 @@ function disableProbeMode() {
     probeMarker.setMap(null);
   }
   probeCoords = null;
+  setProbeSearchValue('', false);
   hideProbePanel();
   document.getElementById('probe-times-list').innerHTML = '';
+  clearProbeTubeStations();
   document.getElementById('probe-times-hint')?.classList.remove('hidden');
 }
 
@@ -1333,7 +1529,9 @@ function clearProbePin() {
   if (probeMarker) probeMarker.setMap(null);
   probeCoords = null;
   probeFetchToken += 1;
+  setProbeSearchValue('', false);
   document.getElementById('probe-times-list').innerHTML = '';
+  clearProbeTubeStations();
   document.getElementById('probe-times-hint')?.classList.remove('hidden');
 }
 

@@ -92,13 +92,27 @@
         tabindex="-1"
       ></button>
       <div id="map-toast" class="map-toast hidden" role="status" aria-live="polite"></div>
-      <div id="probe-times-panel" class="probe-times-panel hidden" role="region" aria-label="Travel times from pin">
+      <div id="probe-times-panel" class="probe-times-panel hidden" role="region" aria-label="Travel times from a location">
         <div class="probe-times-header">
-          <span class="probe-times-title">Travel times from pin</span>
+          <span class="probe-times-title">Travel times from here</span>
           <button type="button" id="probe-times-close" class="probe-times-close" aria-label="Close">×</button>
         </div>
-        <p id="probe-times-hint" class="probe-times-hint">Tap the map to place a pin and see commute times.</p>
-        <div id="probe-times-list" class="probe-times-list"></div>
+        <input
+          id="probe-search-input"
+          class="probe-times-search"
+          type="text"
+          placeholder="Search for an address…"
+          autocomplete="off"
+          spellcheck="false"
+        >
+        <p id="probe-times-hint" class="probe-times-hint">Search for a place or tap the map to see commute times.</p>
+        <div class="probe-times-scroll">
+          <div id="probe-times-list" class="probe-times-list"></div>
+          <div id="probe-tube-section" class="probe-tube-section hidden">
+            <div class="probe-section-label">Nearest tube stations</div>
+            <div id="probe-tube-list" class="probe-tube-list"></div>
+          </div>
+        </div>
       </div>
       <div class="mobile-map-bar" role="toolbar" aria-label="Map controls">
         <button id="toggle-inputs-btn" class="mobile-map-btn" type="button" aria-expanded="false">Inputs</button>

@@ -22,7 +22,7 @@ const Onboarding = (function () {
     },
     {
       title: 'Explore on the map',
-      body: 'Tap anywhere on the map to drop a pin and see exact journey times and step-by-step routes to your destinations. Use the Sampling section to adjust the search area, radius, and how many points are tested.',
+      body: 'Search for an address or tap anywhere on the map to see exact journey times and step-by-step routes to your destinations. Use the Sampling section to adjust the search area, radius, and how many points are tested.',
     },
     {
       title: 'Save your runs',

@@ -247,6 +247,26 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   background: rgba(75, 85, 99, 0.35);
 }
 
+.probe-times-search {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--section-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.probe-times-search:focus { border-color: var(--accent); }
+.probe-times-search::placeholder { color: var(--text-muted); }
+.probe-times-search.confirmed { border-color: #374151; }
+.probe-times-search:not(.confirmed) { border-style: dashed; }
+
 .probe-times-hint {
   font-size: 11px;
   color: var(--text-muted);
@@ -259,10 +279,10 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   display: none;
 }
 
-.probe-times-list {
+.probe-times-scroll {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -270,6 +290,90 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
   padding-right: 2px;
+}
+
+.probe-times-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.probe-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.probe-tube-section {
+  flex-shrink: 0;
+  padding-top: 2px;
+  border-top: 1px solid #334155;
+}
+
+.probe-tube-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.probe-tube-card {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 8px 10px;
+}
+
+.probe-tube-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.probe-tube-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.probe-tube-walk {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.probe-tube-walk.muted {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.probe-tube-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.tube-line-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.tube-line-badge-northern {
+  border: 1px solid #475569;
 }
 
 .probe-times-card {
@@ -1936,6 +2040,7 @@ input[type="number"]:focus { border-color: var(--accent); }
   }
 
   .location-input,
+  .probe-times-search,
   input[type="time"],
   select,
   input[type="number"] {
