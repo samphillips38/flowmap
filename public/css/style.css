@@ -12,7 +12,8 @@
   --btn-hover: #4b5563;
   --sidebar-w: 300px;
   --maps-control-inset: 56px;
-  --mobile-bottom-bar-h: 68px;
+  --mobile-bottom-bar-h: 44px;
+  --probe-sheet-peek-h: 56px;
 }
 
 html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
@@ -212,6 +213,17 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   pointer-events: auto;
   overflow: hidden;
   touch-action: pan-y;
+}
+
+.probe-times-sheet-header {
+  flex-shrink: 0;
+}
+
+.probe-times-sheet-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .probe-times-header {
@@ -446,6 +458,10 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   overflow-wrap: anywhere;
 }
 
+.probe-times-cycle-summary {
+  color: #86efac;
+}
+
 .probe-times-value {
   font-weight: 600;
   color: var(--text);
@@ -556,6 +572,44 @@ html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--b
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.4;
+}
+
+.probe-alt-mode {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #334155;
+}
+
+.probe-alt-mode-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.probe-alt-mode-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #86efac;
+}
+
+.probe-alt-mode-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.probe-route-steps-alt {
+  margin-top: 0;
+}
+
+.probe-route-step-bicycling .probe-route-step-icon {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
 }
 
 .probe-times-loading {
@@ -1622,10 +1676,18 @@ input[type="number"]:focus { border-color: var(--accent); }
   right: 0;
   bottom: 0;
   display: none;
-  gap: 8px;
   z-index: 360;
-  pointer-events: none;
-  padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+  pointer-events: auto;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: rgba(17, 24, 39, 0.96);
+  border-top: 1px solid rgba(51, 65, 85, 0.9);
+  backdrop-filter: blur(10px);
+}
+
+.mobile-map-bar-track {
+  display: flex;
+  width: 100%;
+  pointer-events: auto;
 }
 
 .mobile-map-bar .mobile-map-btn {
@@ -1634,22 +1696,26 @@ input[type="number"]:focus { border-color: var(--accent); }
 
 .mobile-map-btn {
   flex: 1;
-  border: 1px solid #334155;
-  background: rgba(17, 24, 39, 0.92);
-  color: #dbeafe;
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-size: 13px;
+  border: none;
+  border-right: 1px solid rgba(51, 65, 85, 0.65);
+  background: transparent;
+  color: #cbd5e1;
+  border-radius: 0;
+  padding: 10px 8px;
+  font-size: 12px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  backdrop-filter: blur(4px);
   min-height: 44px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mobile-map-btn:last-child {
+  border-right: none;
 }
 
 .mobile-map-btn[aria-expanded="true"] {
-  border-color: var(--accent);
-  background: rgba(14, 116, 144, 0.45);
+  background: rgba(56, 189, 248, 0.2);
   color: #f0f9ff;
 }
 
@@ -1795,11 +1861,63 @@ input[type="number"]:focus { border-color: var(--accent); }
 
 @media (max-width: 980px) {
   .probe-times-panel {
-    left: 10px;
-    right: 10px;
+    left: 0;
+    right: 0;
     width: auto;
-    bottom: calc(var(--mobile-bottom-bar-h) + env(safe-area-inset-bottom, 0px) + 10px);
-    max-height: min(48vh, 420px);
+    bottom: calc(var(--mobile-bottom-bar-h) + env(safe-area-inset-bottom, 0px));
+    max-height: min(72dvh, 560px);
+    padding: 0;
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    background: var(--sidebar-bg);
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.45);
+    transform: translateY(calc(100% - var(--probe-sheet-peek-h)));
+    transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), visibility 0.28s;
+    z-index: 455;
+  }
+
+  .probe-times-panel:not(.hidden) {
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  #map-container.probe-sheet-expanded #probe-times-panel:not(.hidden) {
+    transform: translateY(0);
+  }
+
+  #probe-times-panel.sheet-dragging {
+    transition: none !important;
+  }
+
+  .probe-times-sheet-header {
+    touch-action: none;
+    cursor: grab;
+    padding: 10px 14px 0;
+  }
+
+  .probe-times-header {
+    margin-bottom: 0;
+    padding-bottom: 10px;
+  }
+
+  .probe-times-sheet-body {
+    padding: 0 14px 14px;
+    overflow: hidden;
+    transition: opacity 0.2s ease;
+  }
+
+  #map-container:not(.probe-sheet-expanded) #probe-times-panel:not(.hidden) .probe-times-sheet-body {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    pointer-events: none;
+  }
+
+  #map-container.probe-sheet-expanded #probe-times-panel:not(.hidden) .probe-times-sheet-body {
+    opacity: 1;
+    max-height: none;
   }
 
   .probe-route-details {
@@ -1992,18 +2110,19 @@ input[type="number"]:focus { border-color: var(--accent); }
     padding: 8px 16px 16px;
   }
 
-  #map-container.mobile-legend-open .mobile-map-bar #toggle-legend-btn {
-    border-color: var(--accent);
-  }
-
-  #map-container.history-sheet-open .mobile-map-bar #history-open-btn-mobile {
-    border-color: var(--accent);
-    background: rgba(14, 116, 144, 0.45);
+  #map-container.mobile-legend-open .mobile-map-bar #toggle-legend-btn[aria-expanded="true"] {
+    background: rgba(56, 189, 248, 0.22);
     color: #f0f9ff;
   }
 
-  #app:not(.mobile-sidebar-collapsed) .mobile-map-bar #toggle-inputs-btn {
-    border-color: var(--accent);
+  #map-container.history-sheet-open .mobile-map-bar #history-open-btn-mobile[aria-expanded="true"] {
+    background: rgba(56, 189, 248, 0.22);
+    color: #f0f9ff;
+  }
+
+  #app:not(.mobile-sidebar-collapsed) .mobile-map-bar #toggle-inputs-btn[aria-expanded="true"] {
+    background: rgba(56, 189, 248, 0.22);
+    color: #f0f9ff;
   }
 
   .location-config-grid {
@@ -2064,8 +2183,8 @@ input[type="number"]:focus { border-color: var(--accent); }
 
 @media (max-width: 560px) {
   .mobile-map-btn {
-    font-size: 12px;
-    padding: 10px 8px;
+    font-size: 11px;
+    padding: 10px 6px;
   }
 
   .logo {

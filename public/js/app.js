@@ -61,9 +61,12 @@ let selectedHeatmapLocationIdxs = [];
 let mobileInputsCollapsed = false;
 let mobileLegendOpen = false;
 let historySheetOpen = false;
+let probeSheetSnap = 'expanded';
 let mapToastTimeout = null;
 let sheetDrag = { active: false, sheet: null, startY: 0, offsetY: 0, onClose: null, fromHandle: false };
+let probeSheetDrag = { active: false, startY: 0, offsetY: 0, startSnap: 'expanded' };
 const SHEET_DISMISS_THRESHOLD_PX = 72;
+const PROBE_SHEET_SNAP_THRESHOLD_PX = 56;
 let heatmapDisplayMode = 'both';
 
 function newLocation() {
@@ -88,6 +91,8 @@ window.initApp = async function () {
     center: { lat: 51.505, lng: -0.09 },
     zoom: 11,
     styles: DARK_MAP_STYLE,
+    renderingType: google.maps.RenderingType.VECTOR,
+    isFractionalZoomEnabled: true,
     disableDefaultUI: false,
     zoomControl: !isMapFirstLayout(),
     zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_CENTER },
@@ -247,6 +252,16 @@ function setupEventListeners() {
   setupHistoryTransitionListener();
   setupMobileScrollLock();
   setupMobileSheetSwipe();
+  setupProbeSheetSwipe();
+  setupProbeSheetTransitionListener();
+  document.querySelector('.probe-times-sheet-header')?.addEventListener('click', e => {
+    if (!isMapFirstLayout()) return;
+    const panel = document.getElementById('probe-times-panel');
+    if (panel?.classList.contains('hidden')) return;
+    if (probeSheetSnap === 'peek' && !e.target.closest('#probe-times-close')) {
+      setProbeSheetSnap('expanded');
+    }
+  });
   window.addEventListener('resize', applyMobileUiState);
 }
 
@@ -258,6 +273,138 @@ function resetSheetDragStyles() {
     sheet.style.removeProperty('transform');
   });
   sheetDrag = { active: false, sheet: null, startY: 0, offsetY: 0, onClose: null, fromHandle: false };
+  resetProbeSheetDragStyles();
+}
+
+function resetProbeSheetDragStyles() {
+  const panel = document.getElementById('probe-times-panel');
+  if (!panel) return;
+  panel.classList.remove('sheet-dragging');
+  panel.style.removeProperty('transform');
+  probeSheetDrag = { active: false, startY: 0, offsetY: 0, startSnap: 'expanded' };
+}
+
+function getProbePeekHeight() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--probe-sheet-peek-h');
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : 52;
+}
+
+function getProbePeekOffset(panel) {
+  return Math.max(0, panel.offsetHeight - getProbePeekHeight());
+}
+
+function canStartProbeSheetDrag(panel, target) {
+  if (target.closest('.probe-times-sheet-header, .sheet-grab, #probe-times-close')) return true;
+  const scrollEl = panel.querySelector('.probe-times-scroll');
+  return probeSheetSnap === 'expanded' && (!scrollEl || scrollEl.scrollTop <= 0);
+}
+
+function setProbeSheetSnap(snap) {
+  probeSheetSnap = snap;
+  applyProbeSheetUi();
+  updateMapPadding();
+  triggerMapResize();
+}
+
+function applyProbeSheetUi() {
+  const mapContainer = document.getElementById('map-container');
+  const panel = document.getElementById('probe-times-panel');
+  if (!mapContainer || !panel) return;
+
+  const visible = !panel.classList.contains('hidden') && isMapFirstLayout();
+  mapContainer.classList.toggle('probe-sheet-expanded', visible && probeSheetSnap === 'expanded');
+  mapContainer.classList.toggle('probe-sheet-peek', visible && probeSheetSnap === 'peek');
+}
+
+function finishProbeSheetDrag() {
+  const panel = document.getElementById('probe-times-panel');
+  if (!probeSheetDrag.active || !panel) return;
+
+  const { offsetY: dy, startSnap } = probeSheetDrag;
+  panel.classList.remove('sheet-dragging');
+  panel.style.removeProperty('transform');
+  probeSheetDrag = { active: false, startY: 0, offsetY: 0, startSnap: 'expanded' };
+
+  if (startSnap === 'expanded') {
+    setProbeSheetSnap(dy >= PROBE_SHEET_SNAP_THRESHOLD_PX ? 'peek' : 'expanded');
+  } else if (dy <= -PROBE_SHEET_SNAP_THRESHOLD_PX) {
+    setProbeSheetSnap('expanded');
+  }
+}
+
+function setupProbeSheetSwipe() {
+  const panel = document.getElementById('probe-times-panel');
+  if (!panel || panel.dataset.probeSwipeListener) return;
+  panel.dataset.probeSwipeListener = '1';
+
+  panel.addEventListener('touchstart', e => {
+    if (!isMapFirstLayout() || panel.classList.contains('hidden') || e.touches.length !== 1) return;
+    if (!canStartProbeSheetDrag(panel, e.target)) return;
+
+    probeSheetDrag = {
+      active: true,
+      startY: e.touches[0].clientY,
+      offsetY: 0,
+      startSnap: probeSheetSnap,
+    };
+  }, { passive: true });
+
+  panel.addEventListener('touchmove', e => {
+    if (!probeSheetDrag.active || e.touches.length !== 1) return;
+
+    const dy = e.touches[0].clientY - probeSheetDrag.startY;
+    const peekOffset = getProbePeekOffset(panel);
+
+    if (probeSheetDrag.startSnap === 'expanded') {
+      if (dy <= 0) {
+        probeSheetDrag.offsetY = 0;
+        panel.classList.remove('sheet-dragging');
+        panel.style.removeProperty('transform');
+        return;
+      }
+
+      if (!e.target.closest('.probe-times-sheet-header, .sheet-grab')
+        && panel.querySelector('.probe-times-scroll')?.scrollTop > 0) {
+        probeSheetDrag.active = false;
+        panel.classList.remove('sheet-dragging');
+        panel.style.removeProperty('transform');
+        return;
+      }
+
+      probeSheetDrag.offsetY = dy;
+      panel.classList.add('sheet-dragging');
+      panel.style.transform = `translateY(${dy}px)`;
+      e.preventDefault();
+      return;
+    }
+
+    if (dy < 0) {
+      probeSheetDrag.offsetY = dy;
+      panel.classList.add('sheet-dragging');
+      panel.style.transform = `translateY(${Math.max(0, peekOffset + dy)}px)`;
+      e.preventDefault();
+    } else if (dy > 0) {
+      probeSheetDrag.offsetY = dy;
+      panel.classList.add('sheet-dragging');
+      panel.style.transform = `translateY(${peekOffset + Math.min(dy * 0.25, 24)}px)`;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  panel.addEventListener('touchend', finishProbeSheetDrag, { passive: true });
+  panel.addEventListener('touchcancel', finishProbeSheetDrag, { passive: true });
+}
+
+function setupProbeSheetTransitionListener() {
+  const panel = document.getElementById('probe-times-panel');
+  if (!panel || panel.dataset.probeTransitionListener) return;
+  panel.dataset.probeTransitionListener = '1';
+  panel.addEventListener('transitionend', e => {
+    if (e.propertyName !== 'transform') return;
+    updateMapPadding();
+    triggerMapResize();
+  });
 }
 
 function getSheetScrollEl(sheet) {
@@ -471,6 +618,13 @@ function updateMapPadding() {
       bottom = Math.max(bottom, historySheet.offsetHeight + 16);
     }
   }
+  const probePanel = document.getElementById('probe-times-panel');
+  if (probePanel && !probePanel.classList.contains('hidden')) {
+    const probeH = probeSheetSnap === 'expanded'
+      ? probePanel.offsetHeight
+      : getProbePeekHeight();
+    bottom = Math.max(bottom, probeH + 8);
+  }
 
   googleMap.setOptions({
     padding: { top, right, bottom, left: 14 },
@@ -487,6 +641,10 @@ function enterMapViewMode() {
   mobileInputsCollapsed = true;
   mobileLegendOpen = false;
   historySheetOpen = false;
+  const probePanel = document.getElementById('probe-times-panel');
+  if (probePanel && !probePanel.classList.contains('hidden')) {
+    probeSheetSnap = 'peek';
+  }
   applyMobileUiState();
 }
 
@@ -607,6 +765,7 @@ function applyMobileUiState() {
     inputsBtn.setAttribute('aria-expanded', 'false');
     legendBtn.setAttribute('aria-expanded', 'false');
     legendBtn.classList.remove('hidden');
+    applyProbeSheetUi();
     updateMapPadding();
     triggerMapResize();
     return;
@@ -631,6 +790,14 @@ function applyMobileUiState() {
   }
   inputsBtn.setAttribute('aria-expanded', String(!mobileInputsCollapsed));
   legendBtn.setAttribute('aria-expanded', String(mobileLegendOpen && showKey));
+
+  const probePanel = document.getElementById('probe-times-panel');
+  if (probePanel && !probePanel.classList.contains('hidden')) {
+    if (!mobileInputsCollapsed || mobileLegendOpen || historySheetOpen) {
+      probeSheetSnap = 'peek';
+    }
+  }
+  applyProbeSheetUi();
 
   requestAnimationFrame(() => {
     updateMapPadding();
@@ -727,14 +894,7 @@ function refreshMarkers() {
       position: { lat: loc.coords.lat, lng: loc.coords.lng },
       map: googleMap,
       title: loc.name,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 8,
-        fillColor: color,
-        fillOpacity: 1,
-        strokeColor: '#ffffff',
-        strokeWeight: 2,
-      },
+      icon: makePinIcon(color, { scale: 1.8, strokeWeight: 2 }),
       zIndex: 100,
     });
     markers.push(marker);
@@ -1078,6 +1238,25 @@ function buildRouteSummary(steps) {
   return primary.label;
 }
 
+function renderProbeAltModeHtml(label, route) {
+  if (!route?.seconds) return '';
+
+  const meta = [formatDuration(route.seconds), route.distance].filter(Boolean).join(' · ');
+  const stepsHtml = route.steps?.length
+    ? `<ol class="probe-route-steps probe-route-steps-alt">${route.steps.map(renderRouteStepHtml).join('')}</ol>`
+    : '';
+
+  return `
+    <div class="probe-alt-mode">
+      <div class="probe-alt-mode-header">
+        <span class="probe-alt-mode-label">${escapeHtml(label)}</span>
+        <span class="probe-alt-mode-value">${escapeHtml(meta)}</span>
+      </div>
+      ${stepsHtml}
+    </div>
+  `;
+}
+
 function renderRouteStepHtml(step) {
   if (step.mode === 'transit') {
     const headsign = step.headsign ? ` towards ${escapeHtml(step.headsign)}` : '';
@@ -1176,14 +1355,7 @@ function ensureProbeMarker() {
     map: null,
     draggable: true,
     title: 'Probe location',
-    icon: {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: 9,
-      fillColor: '#f8fafc',
-      fillOpacity: 1,
-      strokeColor: '#6366f1',
-      strokeWeight: 3,
-    },
+    icon: makePinIcon('#f8fafc', { scale: 2, strokeColor: '#6366f1', strokeWeight: 2.5 }),
     zIndex: 200,
   });
   probeMarker.addListener('dragend', () => {
@@ -1200,11 +1372,20 @@ function showProbePanel() {
   const panel = document.getElementById('probe-times-panel');
   if (!panel) return;
   panel.classList.remove('hidden');
+  if (isMapFirstLayout()) {
+    probeSheetSnap = 'expanded';
+    applyProbeSheetUi();
+  }
   document.getElementById('probe-times-hint')?.classList.remove('hidden');
+  updateMapPadding();
+  triggerMapResize();
 }
 
 function hideProbePanel() {
   document.getElementById('probe-times-panel')?.classList.add('hidden');
+  applyProbeSheetUi();
+  updateMapPadding();
+  triggerMapResize();
 }
 
 function formatTubeStationName(name) {
@@ -1280,6 +1461,7 @@ function renderProbeTimesList(rows, loading) {
     hint?.classList.add('hidden');
     list.innerHTML = '<div class="probe-times-loading">Calculating routes…</div>';
     renderProbeTubeStations(null, true);
+    scheduleProbeSheetLayoutUpdate();
     return;
   }
 
@@ -1290,14 +1472,19 @@ function renderProbeTimesList(rows, loading) {
       color,
       duration,
       summary,
+      cycleSummary,
       steps,
+      cycleRoute,
       unavailable,
       distance,
     } = row;
-    const canExpand = !unavailable && steps?.length;
-    const detailsHtml = canExpand
+    const canExpand = (!unavailable && steps?.length) || cycleRoute?.seconds;
+    const detailsHtml = !unavailable && steps?.length
       ? `<ol class="probe-route-steps">${steps.map(renderRouteStepHtml).join('')}</ol>`
-      : `<p class="probe-route-empty">${unavailable ? 'No route found for this mode.' : 'No route details available.'}</p>`;
+      : unavailable
+        ? `<p class="probe-route-empty">No route found for this mode.</p>`
+        : '';
+    const cycleHtml = cycleRoute ? renderProbeAltModeHtml('By bike', cycleRoute) : '';
 
     return `
       <div class="probe-times-card">
@@ -1311,6 +1498,7 @@ function renderProbeTimesList(rows, loading) {
           <span class="probe-times-main">
             <span class="probe-times-label">${escapeHtml(label)}</span>
             ${summary ? `<span class="probe-times-summary">${escapeHtml(summary)}</span>` : ''}
+            ${cycleSummary ? `<span class="probe-times-summary probe-times-cycle-summary">${escapeHtml(cycleSummary)}</span>` : ''}
           </span>
           <span class="probe-times-value${unavailable ? ' muted' : ''}">${escapeHtml(duration)}</span>
           ${canExpand ? '<span class="probe-times-chevron" aria-hidden="true"></span>' : ''}
@@ -1318,10 +1506,20 @@ function renderProbeTimesList(rows, loading) {
         <div class="probe-route-details hidden">
           ${distance ? `<div class="probe-route-distance">${escapeHtml(distance)}</div>` : ''}
           ${detailsHtml}
+          ${cycleHtml}
         </div>
       </div>
     `;
   }).join('');
+  scheduleProbeSheetLayoutUpdate();
+}
+
+function scheduleProbeSheetLayoutUpdate() {
+  if (!isMapFirstLayout()) return;
+  requestAnimationFrame(() => {
+    updateMapPadding();
+    triggerMapResize();
+  });
 }
 
 async function fetchProbeRoute(pinCoords, loc) {
@@ -1369,11 +1567,36 @@ async function fetchProbeRoute(pinCoords, loc) {
   });
 }
 
+function fetchDirectionsRoute(origin, destination, travelMode) {
+  return new Promise(resolve => {
+    directionsService.route({
+      origin: new google.maps.LatLng(origin.lat, origin.lng),
+      destination: new google.maps.LatLng(destination.lat, destination.lng),
+      travelMode,
+    }, (result, status) => {
+      if (status !== 'OK') {
+        resolve(null);
+        return;
+      }
+      resolve(parseRouteSteps(result));
+    });
+  });
+}
+
 async function fetchProbeRoutes(pinCoords, locationConfigs) {
-  const results = locationConfigs.map(() => null);
+  const results = locationConfigs.map(() => ({ primary: null, cycle: null }));
 
   for (let destIdx = 0; destIdx < locationConfigs.length; destIdx++) {
-    results[destIdx] = await fetchProbeRoute(pinCoords, locationConfigs[destIdx]);
+    const loc = locationConfigs[destIdx];
+    results[destIdx].primary = await fetchProbeRoute(pinCoords, loc);
+    if (loc.coords && loc.transport !== 'BICYCLING') {
+      results[destIdx].cycle = await fetchDirectionsRoute(
+        pinCoords,
+        loc.coords,
+        google.maps.TravelMode.BICYCLING,
+      );
+      await sleep(150);
+    }
     if (destIdx < locationConfigs.length - 1) {
       await sleep(150);
     }
@@ -1383,20 +1606,8 @@ async function fetchProbeRoutes(pinCoords, locationConfigs) {
 }
 
 function fetchWalkingRoute(origin, destination) {
-  return new Promise(resolve => {
-    directionsService.route({
-      origin: new google.maps.LatLng(origin.lat, origin.lng),
-      destination: new google.maps.LatLng(destination.lat, destination.lng),
-      travelMode: google.maps.TravelMode.WALKING,
-    }, (result, status) => {
-      if (status !== 'OK') {
-        resolve(null);
-        return;
-      }
-      const leg = result?.routes?.[0]?.legs?.[0];
-      resolve(leg ? { seconds: leg.duration?.value ?? null } : null);
-    });
-  });
+  return fetchDirectionsRoute(origin, destination, google.maps.TravelMode.WALKING)
+    .then(route => (route ? { seconds: route.seconds ?? null } : null));
 }
 
 async function fetchNearbyTubeStations(coords) {
@@ -1467,14 +1678,18 @@ async function updateProbePin(coords, { name = null, fromSearch = false } = {}) 
     const rows = locations.map((loc, idx) => {
       const color = LOCATION_COLORS[idx % LOCATION_COLORS.length];
       const label = loc.name?.trim() ? loc.name.trim() : `Location ${idx + 1}`;
-      const route = routes[idx];
+      const route = routes[idx]?.primary ?? null;
+      const cycleRoute = routes[idx]?.cycle ?? null;
       const seconds = route?.seconds ?? null;
+      const cycleSeconds = cycleRoute?.seconds ?? null;
       return {
         label,
         color,
         duration: seconds === null ? 'No route' : formatDuration(seconds),
         summary: route?.summary || '',
+        cycleSummary: cycleSeconds === null ? '' : `${formatDuration(cycleSeconds)} by bike`,
         steps: route?.steps || [],
+        cycleRoute,
         distance: route?.distance || '',
         unavailable: seconds === null,
       };
@@ -1637,14 +1852,7 @@ function initSamplingVisuals() {
     visible: false,
     draggable: true,
     title: 'Sampling center',
-    icon: {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: 7,
-      fillColor: '#38bdf8',
-      fillOpacity: 1,
-      strokeColor: '#ffffff',
-      strokeWeight: 2,
-    },
+    icon: makePinIcon('#38bdf8', { scale: 1.6, strokeWeight: 2 }),
     zIndex: 160,
   });
 

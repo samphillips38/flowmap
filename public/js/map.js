@@ -484,6 +484,30 @@ function createTransitHeatmap(googleMap) {
   return new TransitHeatmap(googleMap);
 }
 
+// ── Map pin icons ────────────────────────────────────────────────────────────
+
+// Teardrop pin (24×24 viewBox); tip anchors at the lat/lng.
+const MAP_PIN_PATH =
+  'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z';
+
+function makePinIcon(fillColor, options = {}) {
+  const {
+    scale = 1.75,
+    strokeColor = '#ffffff',
+    strokeWeight = 1.5,
+    fillOpacity = 1,
+  } = options;
+  return {
+    path: MAP_PIN_PATH,
+    anchor: new google.maps.Point(12, 22),
+    fillColor,
+    fillOpacity,
+    strokeColor,
+    strokeWeight,
+    scale,
+  };
+}
+
 // ── Dark map style ─────────────────────────────────────────────────────────
 
 const DARK_MAP_STYLE = [
