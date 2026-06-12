@@ -1959,7 +1959,7 @@ input[type="number"]:focus { border-color: var(--accent); }
     width: 100%;
     min-width: 0;
     max-height: min(88dvh, 720px);
-    z-index: 450;
+    z-index: 458;
     border-right: none;
     border-top: 1px solid var(--border);
     border-radius: 16px 16px 0 0;
