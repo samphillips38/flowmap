@@ -6,6 +6,13 @@ const PROBE_TUBE_RADIUS_M = 1500;
 const PROBE_TUBE_MAX = 5;
 const NEARBY_STATION_MODES = 'tube,dlr,overground,elizabeth-line';
 const NEARBY_STATION_STOP_TYPES = 'NaptanMetroStation,NaptanRailStation';
+const STATION_SAMPLING_MODES = 'tube,dlr,overground,elizabeth-line,national-rail';
+const STATION_FETCH_RADIUS_M = 2800;
+const STATION_QUERY_OVERLAP = 1.6;
+const WALK_SPEED_MPS = 5000 / 3600;
+const WALK_DISTANCE_FACTOR = 1.25;
+const DIRECT_SAMPLING_MAX_POINTS = 1000;
+const STATION_SAMPLING_MAX_POINTS = 5000;
 const TUBE_LINE_COLORS = {
   bakerloo: '#B36305',
   central: '#E32017',
@@ -47,6 +54,7 @@ let markers = [];
 let samplingCenter = null;
 let samplingRadiusKm = 8;
 let samplingTargetPoints = 200;
+let samplingStrategy = 'direct';
 let samplingMode = 'radius';
 let samplingBounds = { ...LONDON_BOUNDS };
 let samplingEditMode = true;
@@ -187,6 +195,18 @@ function setupEventListeners() {
     setSegmentedValue('sampling-space-mode', nextMode);
     samplingMode = nextMode;
     toggleSamplingModeUI();
+    updateSamplingPreview();
+    clearResults();
+  });
+
+  document.getElementById('sampling-strategy-mode').addEventListener('click', e => {
+    const btn = e.target.closest('.segment-btn');
+    if (!btn) return;
+    const nextStrategy = btn.dataset.value;
+    if (!nextStrategy || nextStrategy === samplingStrategy) return;
+    setSegmentedValue('sampling-strategy-mode', nextStrategy);
+    samplingStrategy = nextStrategy;
+    toggleSamplingStrategyUI();
     updateSamplingPreview();
     clearResults();
   });
@@ -845,6 +865,7 @@ function applyStateWithoutClearing(entry) {
   updateSearchBtn();
 
   samplingMode = entry.samplingMode || 'radius';
+  samplingStrategy = entry.samplingStrategy === 'station' ? 'station' : 'direct';
   samplingTargetPoints = Number.isFinite(entry.samplingTargetPoints) ? entry.samplingTargetPoints : samplingTargetPoints;
   samplingRadiusKm = Number.isFinite(entry.samplingRadiusKm) ? entry.samplingRadiusKm : samplingRadiusKm;
   samplingCenter = entry.samplingCenter ? { ...entry.samplingCenter } : samplingCenter;
@@ -857,7 +878,9 @@ function applyStateWithoutClearing(entry) {
   document.getElementById('sampling-radius-km').value = String(samplingRadiusKm);
   document.getElementById('sampling-radius-display').textContent = `${samplingRadiusKm.toFixed(1)} km`;
   setSegmentedValue('sampling-space-mode', samplingMode);
+  setSegmentedValue('sampling-strategy-mode', samplingStrategy);
   setSegmentedValue('sampling-visibility-toggle', samplingAreaVisible ? 'show' : 'hide');
+  toggleSamplingStrategyUI();
   toggleSamplingModeUI();
 }
 
@@ -1668,6 +1691,77 @@ function fetchWalkingRoute(origin, destination) {
     .then(route => (route ? { seconds: route.seconds ?? null } : null));
 }
 
+function getStationQueryCenters(bounds, radiusM) {
+  const latStep = (radiusM * STATION_QUERY_OVERLAP) / 111320;
+  const centers = [];
+  for (let lat = bounds.south + latStep / 2; lat <= bounds.north + 0.0001; lat += latStep) {
+    const lngStep = (radiusM * STATION_QUERY_OVERLAP)
+      / (111320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+    for (let lng = bounds.west + lngStep / 2; lng <= bounds.east + 0.0001; lng += lngStep) {
+      centers.push({ lat, lng });
+    }
+  }
+  return centers.length ? centers : [{
+    lat: (bounds.south + bounds.north) / 2,
+    lng: (bounds.west + bounds.east) / 2,
+  }];
+}
+
+function stationWithinSamplingArea(station, { bounds, center, radiusMeters }) {
+  if (station.lat < bounds.south || station.lat > bounds.north) return false;
+  if (station.lng < bounds.west || station.lng > bounds.east) return false;
+  if (center && radiusMeters && haversineMeters(center, station) > radiusMeters) return false;
+  return true;
+}
+
+async function fetchStationsInSamplingArea(sampling) {
+  const areaFilter = {
+    bounds: sampling.bounds,
+    center: sampling.gridOptions?.center || null,
+    radiusMeters: sampling.gridOptions?.radiusMeters || null,
+  };
+  const centers = getStationQueryCenters(areaFilter.bounds, STATION_FETCH_RADIUS_M);
+  const byId = new Map();
+
+  for (let idx = 0; idx < centers.length; idx++) {
+    const coords = centers[idx];
+    const url = new URL('https://api.tfl.gov.uk/StopPoint');
+    url.searchParams.set('lat', String(coords.lat));
+    url.searchParams.set('lon', String(coords.lng));
+    url.searchParams.set('radius', String(STATION_FETCH_RADIUS_M));
+    url.searchParams.set('modes', STATION_SAMPLING_MODES);
+    url.searchParams.set('stopTypes', NEARBY_STATION_STOP_TYPES);
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Could not load transit stations for sampling');
+
+    const data = await res.json();
+    for (const station of data.stopPoints || []) {
+      const id = station.naptanId || station.id || `${station.lat},${station.lon}`;
+      if (byId.has(id)) continue;
+      const point = {
+        id,
+        name: formatTubeStationName(station.commonName || 'Station'),
+        lat: station.lat,
+        lng: station.lon,
+      };
+      if (!stationWithinSamplingArea(point, areaFilter)) continue;
+      byId.set(id, point);
+    }
+
+    if (idx < centers.length - 1) {
+      await sleep(100);
+    }
+  }
+
+  return [...byId.values()];
+}
+
+function estimateWalkSeconds(from, to) {
+  const meters = haversineMeters(from, to) * WALK_DISTANCE_FACTOR;
+  return Math.round(meters / WALK_SPEED_MPS);
+}
+
 async function fetchNearbyTubeStations(coords) {
   const url = new URL('https://api.tfl.gov.uk/StopPoint');
   url.searchParams.set('lat', String(coords.lat));
@@ -1831,6 +1925,7 @@ function initSamplingDefaults() {
   const center = googleMap.getCenter();
   samplingCenter = { name: 'Default center', lat: center.lat(), lng: center.lng() };
   samplingMode = getSegmentedValue('sampling-space-mode') || 'radius';
+  samplingStrategy = getSegmentedValue('sampling-strategy-mode') || 'direct';
   samplingTargetPoints = parseInt(document.getElementById('sampling-density').value, 10);
   samplingRadiusKm = parseFloat(document.getElementById('sampling-radius-km').value);
   samplingAreaVisible = (getSegmentedValue('sampling-visibility-toggle') || 'show') === 'show';
@@ -1838,9 +1933,37 @@ function initSamplingDefaults() {
   document.getElementById('sampling-density-display').textContent = `${samplingTargetPoints}`;
   document.getElementById('sampling-radius-display').textContent = `${samplingRadiusKm.toFixed(1)} km`;
   setSegmentedValue('sampling-space-mode', samplingMode);
+  setSegmentedValue('sampling-strategy-mode', samplingStrategy);
   setSegmentedValue('sampling-visibility-toggle', samplingAreaVisible ? 'show' : 'hide');
   initSamplingVisuals();
+  toggleSamplingStrategyUI();
   toggleSamplingModeUI();
+}
+
+function getSamplingDensityLimit() {
+  return samplingStrategy === 'station' ? STATION_SAMPLING_MAX_POINTS : DIRECT_SAMPLING_MAX_POINTS;
+}
+
+function toggleSamplingStrategyUI() {
+  const hint = document.getElementById('sampling-strategy-hint');
+  const costHint = document.getElementById('sampling-cost-hint');
+  const densityInput = document.getElementById('sampling-density');
+  const isStation = samplingStrategy === 'station';
+
+  hint?.classList.toggle('hidden', !isStation);
+  if (costHint) {
+    costHint.textContent = isStation
+      ? 'Station mode queries transit stops only — increasing map density does not add API calls.'
+      : 'Distance Matrix queries can incur Google API costs.';
+  }
+
+  const maxPoints = getSamplingDensityLimit();
+  densityInput.max = String(maxPoints);
+  if (samplingTargetPoints > maxPoints) {
+    samplingTargetPoints = maxPoints;
+    densityInput.value = String(maxPoints);
+    document.getElementById('sampling-density-display').textContent = `${maxPoints}`;
+  }
 }
 
 function clampSamplingRadiusKm(km) {
@@ -2110,6 +2233,77 @@ function updateSamplingPreview() {
 
 // ── Distance Matrix calls ──────────────────────────────────────────────────
 
+async function fetchStationTimesMatrix(locationConfigs, stations) {
+  const stationTimes = stations.map(() => locationConfigs.map(() => null));
+  const totalBatches = Math.ceil(stations.length / DEST_BATCH);
+
+  for (let originIdx = 0; originIdx < locationConfigs.length; originIdx++) {
+    const loc = locationConfigs[originIdx];
+    const travelMode = google.maps.TravelMode[loc.transport];
+    const departureTime = buildDepartureTime(loc.departDay, loc.departTime);
+
+    for (let start = 0; start < stations.length; start += DEST_BATCH) {
+      const batch = stations.slice(start, start + DEST_BATCH);
+      const batchIdx = Math.floor(start / DEST_BATCH) + 1;
+      setLoadingText(`Location ${originIdx + 1}/${locationConfigs.length} - Station batch ${batchIdx}/${totalBatches}...`);
+
+      const request = {
+        origins: batch.map(station => new google.maps.LatLng(station.lat, station.lng)),
+        destinations: [new google.maps.LatLng(loc.coords.lat, loc.coords.lng)],
+        travelMode,
+      };
+
+      if (travelMode === google.maps.TravelMode.TRANSIT) {
+        applyTransitRequestOptions(request, departureTime);
+      } else if (travelMode === google.maps.TravelMode.DRIVING) {
+        request.drivingOptions = { departureTime };
+      }
+
+      await new Promise((resolve, reject) => {
+        matrixService.getDistanceMatrix(request, (response, status) => {
+          if (status !== 'OK') {
+            reject(new Error(`Distance Matrix error: ${status}`));
+            return;
+          }
+
+          batch.forEach((_, stationIdx) => {
+            const el = response.rows[stationIdx].elements[0];
+            if (el.status !== 'OK') return;
+            let seconds = el.duration.value;
+            if (Number.isFinite(loc.maxTravelMins) && loc.maxTravelMins > 0) {
+              seconds = Math.min(seconds, loc.maxTravelMins * 60);
+            }
+            stationTimes[start + stationIdx][originIdx] = seconds;
+          });
+          resolve();
+        });
+      });
+
+      if (start + DEST_BATCH < stations.length) {
+        await sleep(150);
+      }
+    }
+  }
+
+  return stationTimes;
+}
+
+function buildGridTimesFromStations(gridPoints, stations, stationTimesMatrix, locationConfigs) {
+  return gridPoints.map(point => locationConfigs.map((loc, locIdx) => {
+    let best = null;
+    for (let stationIdx = 0; stationIdx < stations.length; stationIdx++) {
+      const transitSeconds = stationTimesMatrix[stationIdx]?.[locIdx];
+      if (transitSeconds === null || transitSeconds === undefined) continue;
+      let total = estimateWalkSeconds(point, stations[stationIdx]) + transitSeconds;
+      if (Number.isFinite(loc.maxTravelMins) && loc.maxTravelMins > 0) {
+        total = Math.min(total, loc.maxTravelMins * 60);
+      }
+      if (best === null || total < best) best = total;
+    }
+    return best;
+  }));
+}
+
 async function runSearch() {
   hideMapToast();
   clearResults();
@@ -2125,11 +2319,34 @@ async function runSearch() {
     return;
   }
 
-  setLoading(true, `Querying ${grid.length} locations (${Math.ceil(grid.length / DEST_BATCH)} batches)…`);
+  if (samplingStrategy === 'station' && locations.some(loc => loc.transport !== 'TRANSIT')) {
+    showError('Station sampling requires public transit for all locations.');
+    return;
+  }
+
+  const useStationSampling = samplingStrategy === 'station';
+  setLoading(
+    true,
+    useStationSampling
+      ? `Loading stations for ${grid.length} map points…`
+      : `Querying ${grid.length} locations (${Math.ceil(grid.length / DEST_BATCH)} batches)…`,
+  );
 
   try {
-    // timesMatrix[gridIdx][locationIdx] = seconds from grid point to that location
-    const timesMatrix = await fetchTimesMatrix(locations, grid);
+    let timesMatrix;
+    if (useStationSampling) {
+      setLoadingText('Finding transit stations in sampling area…');
+      const stations = await fetchStationsInSamplingArea(sampling);
+      if (!stations.length) {
+        throw new Error('No transit stations found in the sampling area. Try a larger radius or rectangle.');
+      }
+      setLoadingText(`Querying ${stations.length} stations (${Math.ceil(stations.length / DEST_BATCH)} batches per location)…`);
+      const stationTimesMatrix = await fetchStationTimesMatrix(locations, stations);
+      timesMatrix = buildGridTimesFromStations(grid, stations, stationTimesMatrix, locations);
+    } else {
+      // timesMatrix[gridIdx][locationIdx] = seconds from grid point to that location
+      timesMatrix = await fetchTimesMatrix(locations, grid);
+    }
 
     latestHeatmapData = { grid, timesMatrix };
     selectedHeatmapLocationIdxs = locations.map((_, idx) => idx);
@@ -2289,6 +2506,7 @@ function buildHistoryEntry({ gridPoints, reachableCount, timesMatrix = [] }) {
       maxTravelMins: loc.maxTravelMins,
     })),
     samplingMode,
+    samplingStrategy,
     samplingTargetPoints,
     samplingRadiusKm,
     samplingCenter: samplingCenter ? { ...samplingCenter } : null,
@@ -2409,6 +2627,9 @@ function renderHistoryList() {
     const samplingLabel = entry.samplingMode === 'radius'
       ? `${Number(entry.samplingRadiusKm || 0).toFixed(1)} km radius`
       : 'Rectangle area';
+    const strategyTag = entry.samplingStrategy === 'station'
+      ? '<span class="history-tag">Station sampling</span>'
+      : '';
 
     item.innerHTML = `
       <div class="history-item-header">
@@ -2419,6 +2640,7 @@ function renderHistoryList() {
       <div class="history-tags">
         <span class="history-tag">${escapeHtml(formatCombineModeLabel(entry.combineMode || 'sum'))}</span>
         <span class="history-tag">${escapeHtml(samplingLabel)}</span>
+        ${strategyTag}
         <span class="history-tag">${entry.reachableCount ?? 0} reachable</span>
       </div>
       <div class="history-actions">

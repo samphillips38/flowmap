@@ -55,6 +55,17 @@
         </div>
 
         <div class="advanced-group">
+          <label>Sampling method</label>
+          <div id="sampling-strategy-mode" class="segmented-control" role="group" aria-label="Sampling method">
+            <button type="button" class="segment-btn active" data-value="direct">Direct</button>
+            <button type="button" class="segment-btn" data-value="station">Station</button>
+          </div>
+          <p id="sampling-strategy-hint" class="sampling-strategy-hint hidden">
+            Queries travel times to nearby stations, then estimates walking from each map point. Higher density uses no extra API calls.
+          </p>
+        </div>
+
+        <div class="advanced-group">
           <label>Sampling area</label>
           <div id="sampling-visibility-toggle" class="segmented-control" role="group" aria-label="Sampling area visibility">
             <button type="button" class="segment-btn active" data-value="show">Show</button>
@@ -78,7 +89,7 @@
       <div id="status-msg" class="status-msg hidden"></div>
 
       <div class="sidebar-footer">
-        <span>Distance Matrix queries can incur Google API costs.</span>
+        <span id="sampling-cost-hint">Distance Matrix queries can incur Google API costs.</span>
       </div>
     </aside>
 

@@ -1211,6 +1211,17 @@ input[type="number"]:focus { border-color: var(--accent); }
   font-weight: 500;
 }
 
+.sampling-strategy-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.sampling-strategy-hint.hidden {
+  display: none;
+}
+
 .advanced-group input[type="range"] {
   width: 100%;
 }
